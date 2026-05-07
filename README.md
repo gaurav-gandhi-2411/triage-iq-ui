@@ -25,20 +25,26 @@ npm run dev
 
 ### Environment variables
 
-| File | Used when | `VITE_API_BASE_URL` |
-|---|---|---|
-| `.env.development` | `npm run dev` | `http://localhost:8080` |
-| `.env.production` | `npm run build` | Cloud Run URL |
+| File | Committed | Used when | `VITE_API_BASE_URL` |
+|---|---|---|---|
+| `.env.development` | yes | `npm run dev` | `http://localhost:8080` |
+| `.env.development.local` | **no** (gitignored) | `npm run dev` (overrides above) | Cloud Run URL or any override |
+| `.env.production` | yes | `npm run build` | Cloud Run URL |
 
-> **Windows gotcha — do not edit `.env` files in Notepad.** Notepad saves UTF-8 files with a BOM (`EF BB BF`), which makes Vite read the env var key as `﻿VITE_API_BASE_URL` instead of `VITE_API_BASE_URL`, causing `undefined` at runtime (symptom: requests go to `localhost:5173/undefined/triage`). Use VS Code, or write the file from PowerShell with .NET's `WriteAllText` + `UTF8Encoding(emitBOM: false)`:
->
-> ```powershell
-> [System.IO.File]::WriteAllText(
->   "$PWD\.env.development",
->   "VITE_API_BASE_URL=http://localhost:8080`n",
->   [System.Text.UTF8Encoding]::new($false)
-> )
-> ```
+Vite loads `.local` files after the base file and they take precedence. To point your local dev server at the live API without touching committed files:
+
+```powershell
+# Run once — creates .env.development.local (gitignored, never committed)
+[System.IO.File]::WriteAllText(
+  "$PWD\.env.development.local",
+  "VITE_API_BASE_URL=https://triageiq-api-779563952988.us-central1.run.app`n",
+  [System.Text.UTF8Encoding]::new($false)
+)
+```
+
+Delete `.env.development.local` to go back to the local API.
+
+> **Windows gotcha — do not edit `.env` files in Notepad.** Notepad saves UTF-8 files with a BOM (`EF BB BF`), which makes Vite parse the env var key as `﻿VITE_API_BASE_URL` instead of `VITE_API_BASE_URL`, causing `undefined` at runtime (symptom: requests go to `localhost:5173/undefined/triage`). Use VS Code, or use the PowerShell `.NET` snippet above.
 
 ### Available scripts
 
