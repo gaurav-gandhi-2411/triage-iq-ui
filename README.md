@@ -1,73 +1,62 @@
-# React + TypeScript + Vite
+# triage-iq-ui
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React frontend for [TriageIQ](https://github.com/gaurav-gandhi-2411/triage-iq) — ML-powered GitHub issue triage assistant.
 
-Currently, two official plugins are available:
+**Live API:** `https://triageiq-api-779563952988.us-central1.run.app`
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## Local development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Prerequisites
 
-## Expanding the ESLint configuration
+- Node.js 18+
+- TriageIQ API running locally (optional — `.env.development` points to `localhost:8080` by default)
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Setup
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+git clone https://github.com/gaurav-gandhi-2411/triage-iq-ui.git
+cd triage-iq-ui
+npm install
+npm run dev
+# → http://localhost:5173
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Environment variables
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+| File | Used when | `VITE_API_BASE_URL` |
+|---|---|---|
+| `.env.development` | `npm run dev` | `http://localhost:8080` |
+| `.env.production` | `npm run build` | Cloud Run URL |
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+> **Windows gotcha — do not edit `.env` files in Notepad.** Notepad saves UTF-8 files with a BOM (`EF BB BF`), which makes Vite read the env var key as `﻿VITE_API_BASE_URL` instead of `VITE_API_BASE_URL`, causing `undefined` at runtime (symptom: requests go to `localhost:5173/undefined/triage`). Use VS Code, or write the file from PowerShell with .NET's `WriteAllText` + `UTF8Encoding(emitBOM: false)`:
+>
+> ```powershell
+> [System.IO.File]::WriteAllText(
+>   "$PWD\.env.development",
+>   "VITE_API_BASE_URL=http://localhost:8080`n",
+>   [System.Text.UTF8Encoding]::new($false)
+> )
+> ```
+
+### Available scripts
+
+```bash
+npm run dev      # start dev server (http://localhost:5173)
+npm run build    # production build to dist/
+npm run preview  # preview production build locally
+npm run lint     # ESLint
 ```
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | React 19 + TypeScript |
+| Build | Vite 8 |
+| Styling | Tailwind CSS v4 |
+| Components | shadcn/ui (card, input, textarea, select, badge, button, label) |
+| Icons | lucide-react |
