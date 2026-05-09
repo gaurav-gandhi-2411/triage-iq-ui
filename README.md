@@ -1,4 +1,4 @@
-# triage-iq-ui
+# TriageIQ
 
 React frontend for [TriageIQ](https://github.com/gaurav-gandhi-2411/triage-iq) — ML-powered GitHub issue triage assistant.
 

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTheme } from "next-themes";
+import { toast } from "sonner";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,12 +27,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertCircle,
+  ChevronDown,
+  Clock,
+  Copy,
   ExternalLink,
+  Link2,
   Loader2,
   Monitor,
   Moon,
   Sparkles,
   Sun,
+  Trash2,
   Zap,
 } from "lucide-react";
 
@@ -42,6 +48,8 @@ type Repo = (typeof REPOS)[number];
 
 const TITLE_MAX = 512;
 const BODY_MAX = 32000;
+const HISTORY_KEY = "triageiq_history";
+const HISTORY_MAX = 10;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +81,14 @@ interface Sample {
   repo: Repo;
   title: string;
   body: string;
+}
+
+interface HistoryEntry {
+  id: string;
+  ts: number;
+  repo: Repo;
+  title: string;
+  result: TriagePlan;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +129,7 @@ const SAMPLES: Sample[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Async helpers for fade transitions
+// Async helpers
 // ---------------------------------------------------------------------------
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -128,8 +144,53 @@ function fmtDays(d: number): string {
   return `${d % 1 === 0 ? d.toFixed(0) : d.toFixed(1)}d`;
 }
 
+function timeAgo(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 // ---------------------------------------------------------------------------
-// Priority config — intentional neutral tones; dark variants keep contrast
+// localStorage history helpers
+// ---------------------------------------------------------------------------
+
+function loadHistory(): HistoryEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// URL helpers
+// ---------------------------------------------------------------------------
+
+function readUrlParams(): { repo: Repo | null; title: string; body: string } {
+  const p = new URLSearchParams(window.location.search);
+  const r = p.get("repo");
+  return {
+    repo: r && (REPOS as readonly string[]).includes(r) ? (r as Repo) : null,
+    title: p.get("title") ?? "",
+    body: p.get("body") ?? "",
+  };
+}
+
+function pushShareUrl(repo: string, title: string, body: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("repo", repo);
+  url.searchParams.set("title", title);
+  if (body.trim()) url.searchParams.set("body", body);
+  else url.searchParams.delete("body");
+  window.history.replaceState(null, "", url.toString());
+}
+
+// ---------------------------------------------------------------------------
+// Priority config
 // ---------------------------------------------------------------------------
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -140,14 +201,15 @@ const PRIORITY_BADGE: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Theme toggle — cycles light → dark → system
+// ThemeToggle
 // ---------------------------------------------------------------------------
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => setMounted(true), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useState(() => { setMounted(true); });
 
   if (!mounted) return <div className="size-8 shrink-0 self-center" />;
 
@@ -170,7 +232,7 @@ function ThemeToggle() {
 }
 
 // ---------------------------------------------------------------------------
-// Character counter
+// CharCounter
 // ---------------------------------------------------------------------------
 
 function CharCounter({ current, max }: { current: number; max: number }) {
@@ -189,7 +251,7 @@ function CharCounter({ current, max }: { current: number; max: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// Sample issues popover
+// SamplesPopover
 // ---------------------------------------------------------------------------
 
 function SamplesPopover({ onSelect }: { onSelect: (s: Sample) => void }) {
@@ -252,6 +314,80 @@ function SamplesPopover({ onSelect }: { onSelect: (s: Sample) => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// HistorySection
+// ---------------------------------------------------------------------------
+
+function HistorySection({
+  entries,
+  onSelect,
+  onClear,
+}: {
+  entries: HistoryEntry[];
+  onSelect: (e: HistoryEntry) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center justify-between w-full text-sm text-muted-foreground hover:text-foreground transition-colors py-1"
+      >
+        <span className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          Recent triages ({entries.length})
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {entries.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => onSelect(e)}
+              className="w-full text-left rounded-md border border-border bg-card px-3 py-2 hover:bg-accent/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <p className="text-sm font-medium line-clamp-1 text-foreground">
+                {e.title}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <span
+                  className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium border ${PRIORITY_BADGE[e.result.priority_guess] ?? ""}`}
+                >
+                  {e.result.priority_guess}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {timeAgo(e.ts)}
+                </span>
+                <span className="text-xs text-muted-foreground truncate">
+                  {e.repo}
+                </span>
+              </div>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors px-1 pt-0.5"
+          >
+            <Trash2 className="h-3 w-3" />
+            Clear history
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
@@ -270,13 +406,7 @@ function ConfidenceBar({ value }: { value: number }) {
   );
 }
 
-function ResolutionBar({
-  lower,
-  upper,
-}: {
-  lower: number;
-  upper: number;
-}) {
+function ResolutionBar({ lower, upper }: { lower: number; upper: number }) {
   const range = upper - lower;
   const markerPct = range > 0 ? 50 : 0;
 
@@ -298,13 +428,7 @@ function ResolutionBar({
   );
 }
 
-function SimilarIssueCard({
-  issue,
-  repo,
-}: {
-  issue: SimilarIssue;
-  repo: Repo;
-}) {
+function SimilarIssueCard({ issue, repo }: { issue: SimilarIssue; repo: Repo }) {
   const pct = Math.round(issue.similarity * 100);
   const url = `https://github.com/${repo}/issues/${issue.number}`;
   return (
@@ -315,9 +439,9 @@ function SimilarIssueCard({
       className="block rounded-lg border border-border bg-card p-3 hover:bg-accent/30 transition-colors cursor-pointer"
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="flex items-center gap-1 text-xs font-mono font-medium text-brand">
+        <span className="flex items-center gap-1 text-xs font-mono font-medium text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors">
           #{issue.number}
-          <ExternalLink className="h-3 w-3 text-brand/60" />
+          <ExternalLink className="h-3 w-3 text-muted-foreground" />
         </span>
         <span className="text-xs text-muted-foreground">{pct}%</span>
       </div>
@@ -378,17 +502,63 @@ function TriagePlanSkeleton() {
   );
 }
 
-function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
+function TriagePlanCard({
+  plan,
+  repo,
+  onCopyLink,
+  onCopyJson,
+}: {
+  plan: TriagePlan;
+  repo: Repo;
+  onCopyLink: () => void;
+  onCopyJson: () => void;
+}) {
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <CardTitle className="text-base">Triage Plan</CardTitle>
-          <Badge
-            className={`shrink-0 border text-xs font-medium ${PRIORITY_BADGE[plan.priority_guess] ?? ""}`}
-          >
-            {plan.priority_guess} priority
-          </Badge>
+          <div className="flex items-center gap-1 shrink-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 hover:text-brand"
+                    type="button"
+                    aria-label="Copy share link"
+                  />
+                }
+                onClick={onCopyLink}
+              >
+                <Link2 className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Copy link</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 hover:text-brand"
+                    type="button"
+                    aria-label="Copy result as JSON"
+                  />
+                }
+                onClick={onCopyJson}
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Copy as JSON</TooltipContent>
+            </Tooltip>
+            <Badge
+              className={`border text-xs font-medium ${PRIORITY_BADGE[plan.priority_guess] ?? ""}`}
+            >
+              {plan.priority_guess} priority
+            </Badge>
+          </div>
         </div>
         <CardDescription className="mt-2 text-sm leading-relaxed">
           {plan.triage_summary}
@@ -478,7 +648,7 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
         </div>
 
         <details className="border-t border-border pt-3">
-          <summary className="cursor-pointer select-none text-xs text-brand">
+          <summary className="cursor-pointer select-none text-xs text-muted-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:text-foreground hover:decoration-foreground transition-colors">
             Raw JSON · request {plan._request_id.slice(0, 8)}… · {plan._llm_status}
           </summary>
           <pre className="mt-2 overflow-auto rounded bg-muted p-3 text-xs text-muted-foreground">
@@ -495,14 +665,17 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const [repo, setRepo] = useState<Repo>("microsoft/vscode");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const urlParams = readUrlParams();
+
+  const [repo, setRepo] = useState<Repo>(urlParams.repo ?? "microsoft/vscode");
+  const [title, setTitle] = useState(urlParams.title);
+  const [body, setBody] = useState(urlParams.body);
   const [loading, setLoading] = useState(false);
   const [hasSucceeded, setHasSucceeded] = useState(false);
   const [result, setResult] = useState<TriagePlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paneVisible, setPaneVisible] = useState(true);
+  const [recentTriages, setRecentTriages] = useState<HistoryEntry[]>(loadHistory);
 
   function handleSampleSelect(s: Sample) {
     setRepo(s.repo);
@@ -510,17 +683,49 @@ export default function App() {
     setBody(s.body);
   }
 
+  function handleCopyLink() {
+    navigator.clipboard
+      .writeText(window.location.href)
+      .then(() => toast.success("Link copied"))
+      .catch(() => toast.error("Could not copy link"));
+  }
+
+  function handleCopyJson(plan: TriagePlan) {
+    navigator.clipboard
+      .writeText(JSON.stringify(plan, null, 2))
+      .then(() => toast.success("JSON copied"))
+      .catch(() => toast.error("Could not copy JSON"));
+  }
+
+  function handleHistoryClear() {
+    setRecentTriages([]);
+    localStorage.removeItem(HISTORY_KEY);
+  }
+
+  async function handleHistorySelect(entry: HistoryEntry) {
+    setPaneVisible(false);
+    await sleep(150);
+    setRepo(entry.repo);
+    setTitle(entry.title);
+    setResult(entry.result);
+    setHasSucceeded(true);
+    setError(null);
+    setLoading(false);
+    pushShareUrl(entry.repo, entry.title, "");
+    await doubleRAF();
+    setPaneVisible(true);
+  }
+
   async function doTriage() {
     if (loading || !title.trim()) return;
 
-    // Fade out current content
     setPaneVisible(false);
     await sleep(200);
 
     setLoading(true);
     setResult(null);
     setError(null);
-    setPaneVisible(true); // skeleton fades in
+    setPaneVisible(true);
 
     try {
       const res = await fetch(`${API_BASE}/triage`, {
@@ -546,7 +751,6 @@ export default function App() {
           msg = `Unexpected error: ${res.status}. Try again.`;
         }
 
-        // Skeleton → error
         setPaneVisible(false);
         await sleep(150);
         setLoading(false);
@@ -558,12 +762,32 @@ export default function App() {
 
       const data = (await res.json()) as TriagePlan;
 
-      // Skeleton → result
       setPaneVisible(false);
       await sleep(150);
       setLoading(false);
       setResult(data);
       setHasSucceeded(true);
+
+      // Save to history (FIFO, max 10)
+      const entry: HistoryEntry = {
+        id: data._request_id,
+        ts: Date.now(),
+        repo,
+        title,
+        result: data,
+      };
+      setRecentTriages((prev) => {
+        const next = [entry, ...prev.filter((h) => h.id !== entry.id)].slice(
+          0,
+          HISTORY_MAX
+        );
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+        return next;
+      });
+
+      // Update URL for sharing
+      pushShareUrl(repo, title, body);
+
       await doubleRAF();
       setPaneVisible(true);
     } catch (err) {
@@ -592,7 +816,7 @@ export default function App() {
   const isDisabledForTitle = !title.trim() && !loading;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Page header */}
       <header className="border-b border-border bg-background px-4 py-3 sm:py-4">
         <div className="mx-auto max-w-screen-xl flex items-center gap-4">
@@ -610,9 +834,9 @@ export default function App() {
       </header>
 
       {/* Two-column layout */}
-      <main className="mx-auto max-w-screen-xl px-3 py-4 sm:px-4 sm:py-8">
+      <main className="mx-auto max-w-screen-xl w-full px-3 py-4 sm:px-4 sm:py-8 flex-1">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          {/* LEFT: form */}
+          {/* LEFT: form + history */}
           <div className="w-full lg:w-96 lg:shrink-0">
             <Card>
               <CardHeader>
@@ -648,7 +872,7 @@ export default function App() {
                       href={`https://github.com/${repo}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-0.5 flex items-center gap-1 text-xs text-brand hover:underline w-fit"
+                      className="mt-0.5 flex items-center gap-1 text-xs text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors w-fit"
                     >
                       <ExternalLink className="h-3 w-3" />
                       github.com/{repo}
@@ -683,7 +907,7 @@ export default function App() {
                     <CharCounter current={body.length} max={BODY_MAX} />
                   </div>
 
-                  {/* Submit — wrapped in tooltip when title is empty */}
+                  {/* Submit */}
                   <Tooltip disabled={!isDisabledForTitle}>
                     <TooltipTrigger className="block w-full">
                       <Button
@@ -711,9 +935,16 @@ export default function App() {
                 </form>
               </CardContent>
             </Card>
+
+            {/* History */}
+            <HistorySection
+              entries={recentTriages}
+              onSelect={(e) => void handleHistorySelect(e)}
+              onClear={handleHistoryClear}
+            />
           </div>
 
-          {/* RIGHT: result / skeleton / empty state — fades on transition */}
+          {/* RIGHT: result / skeleton / empty state */}
           <div
             className={`min-w-0 flex-1 transition-opacity duration-200 ${
               paneVisible ? "opacity-100" : "opacity-0"
@@ -737,7 +968,14 @@ export default function App() {
                 </AlertAction>
               </Alert>
             )}
-            {!loading && result && <TriagePlanCard plan={result} repo={repo} />}
+            {!loading && result && (
+              <TriagePlanCard
+                plan={result}
+                repo={repo}
+                onCopyLink={handleCopyLink}
+                onCopyJson={() => handleCopyJson(result)}
+              />
+            )}
             {!loading && !result && !error && (
               <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-border text-sm text-muted-foreground lg:h-full lg:min-h-64">
                 Triage plan will appear here
@@ -746,6 +984,39 @@ export default function App() {
           </div>
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-border py-4 px-4 mt-auto">
+        <div className="mx-auto max-w-screen-xl text-center text-xs text-muted-foreground">
+          Built by{" "}
+          <a
+            href="https://github.com/gaurav-gandhi-2411"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors"
+          >
+            Gaurav Gandhi
+          </a>
+          {" · "}
+          <a
+            href="https://github.com/gaurav-gandhi-2411/triage-iq-ui"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors"
+          >
+            GitHub repo
+          </a>
+          {" · "}
+          <a
+            href="https://triageiq-api-779563952988.us-central1.run.app/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors"
+          >
+            API docs
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }
