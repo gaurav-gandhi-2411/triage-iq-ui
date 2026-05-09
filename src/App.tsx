@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -22,12 +23,14 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   AlertCircle,
   ExternalLink,
   Loader2,
   Monitor,
   Moon,
+  Sparkles,
   Sun,
   Zap,
 } from "lucide-react";
@@ -36,6 +39,9 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
 
 const REPOS = ["microsoft/vscode", "kubernetes/kubernetes"] as const;
 type Repo = (typeof REPOS)[number];
+
+const TITLE_MAX = 512;
+const BODY_MAX = 32000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +68,57 @@ interface TriagePlan {
   _request_id: string;
   _llm_status: string;
 }
+
+interface Sample {
+  repo: Repo;
+  title: string;
+  body: string;
+}
+
+// ---------------------------------------------------------------------------
+// Sample issues
+// ---------------------------------------------------------------------------
+
+const SAMPLES: Sample[] = [
+  {
+    repo: "microsoft/vscode",
+    title: "Terminal cursor disappears after switching tabs",
+    body: "When I switch between terminal tabs, the cursor stops blinking. I have to click into the terminal panel to make it appear again. This started after the 1.85 update on macOS.",
+  },
+  {
+    repo: "microsoft/vscode",
+    title: "json parsing breaks on large files",
+    body: "When I open a 50MB JSON file, VS Code freezes for ~30 seconds, then sometimes the file appears corrupted afterwards. Reproducible with any large valid JSON.",
+  },
+  {
+    repo: "microsoft/vscode",
+    title: "[Error] unhandledError-potential listener LEAK detected",
+    body: "Stack trace from vs/base/common/event.ts:1062 with multiple listeners not being properly disposed. Affecting telemetry in production builds.",
+  },
+  {
+    repo: "kubernetes/kubernetes",
+    title: "kubectl exec hangs on large stdout streams",
+    body: "Running kubectl exec on a pod that produces large output (>10MB) causes the command to hang indefinitely. Must Ctrl-C to recover. Reproducible across kubectl 1.28+.",
+  },
+  {
+    repo: "kubernetes/kubernetes",
+    title: "Pod stuck in Terminating state for 30+ minutes",
+    body: "After kubectl delete pod, the pod stays in Terminating phase for 30+ minutes despite having no finalizers and grace period of 0. Forcing deletion with --force --grace-period=0 works but should not be required.",
+  },
+  {
+    repo: "kubernetes/kubernetes",
+    title: "HPA scale-up triggered by spurious CPU metrics",
+    body: "HorizontalPodAutoscaler scaling pods up based on transient CPU spikes that resolve in seconds. metrics-server reports stale data. Need a smoothing window.",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Async helpers for fade transitions
+// ---------------------------------------------------------------------------
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const doubleRAF = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -92,7 +149,7 @@ function ThemeToggle() {
 
   useEffect(() => setMounted(true), []);
 
-  if (!mounted) return <div className="h-8 w-8 shrink-0" />;
+  if (!mounted) return <div className="size-8 shrink-0 self-center" />;
 
   const next =
     theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
@@ -105,10 +162,92 @@ function ThemeToggle() {
       size="icon"
       onClick={() => setTheme(next)}
       aria-label={`Switch to ${next} mode`}
-      className="shrink-0"
+      className="shrink-0 self-center"
     >
       <Icon className="h-4 w-4" />
     </Button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Character counter
+// ---------------------------------------------------------------------------
+
+function CharCounter({ current, max }: { current: number; max: number }) {
+  const ratio = current / max;
+  const colorClass =
+    ratio >= 1
+      ? "text-destructive font-medium"
+      : ratio >= 0.9
+      ? "text-amber-500 dark:text-amber-400"
+      : "text-muted-foreground";
+  return (
+    <p className={`text-right text-xs tabular-nums ${colorClass}`}>
+      {current.toLocaleString()} / {max.toLocaleString()}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sample issues popover
+// ---------------------------------------------------------------------------
+
+function SamplesPopover({ onSelect }: { onSelect: (s: Sample) => void }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={(o) => setOpen(o)}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          />
+        }
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Try a sample
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-96 p-0 max-h-[480px] overflow-y-auto"
+        align="start"
+        side="bottom"
+      >
+        <div className="border-b px-3 py-2 sticky top-0 bg-popover">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Sample issues
+          </p>
+        </div>
+        {SAMPLES.map((s, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => {
+              onSelect(s);
+              setOpen(false);
+            }}
+            className="w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors border-b last:border-0 focus-visible:bg-accent/40 outline-none"
+          >
+            <div className="flex items-start justify-between gap-2 mb-0.5">
+              <p className="text-sm font-medium text-foreground line-clamp-1 flex-1">
+                {s.title}
+              </p>
+              <Badge
+                variant="outline"
+                className="shrink-0 text-xs py-0 font-normal"
+              >
+                {s.repo.split("/")[0]}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground line-clamp-2 leading-snug">
+              {s.body}
+            </p>
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -242,7 +381,6 @@ function TriagePlanSkeleton() {
 function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
   return (
     <Card>
-      {/* HEADER */}
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <CardTitle className="text-base">Triage Plan</CardTitle>
@@ -260,9 +398,7 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
       <CardContent className="space-y-5">
         <Separator />
 
-        {/* METRICS ROW */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {/* Component */}
           <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Component
@@ -273,7 +409,6 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
             <ConfidenceBar value={plan.component_confidence} />
           </div>
 
-          {/* Resolution */}
           <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Resolution
@@ -287,7 +422,6 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
             />
           </div>
 
-          {/* Assignee */}
           <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Suggested assignee
@@ -300,9 +434,7 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
 
         <Separator />
 
-        {/* DETAILS */}
         <div className="space-y-5">
-          {/* Priority rationale */}
           <div>
             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Priority rationale
@@ -310,7 +442,6 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
             <p className="text-sm text-muted-foreground">{plan.priority_rationale}</p>
           </div>
 
-          {/* Next steps */}
           {plan.suggested_next_steps.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -332,7 +463,6 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
             </div>
           )}
 
-          {/* Similar issues */}
           {plan.similar_issues.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -347,7 +477,6 @@ function TriagePlanCard({ plan, repo }: { plan: TriagePlan; repo: Repo }) {
           )}
         </div>
 
-        {/* Raw JSON */}
         <details className="border-t border-border pt-3">
           <summary className="cursor-pointer select-none text-xs text-brand">
             Raw JSON · request {plan._request_id.slice(0, 8)}… · {plan._llm_status}
@@ -373,14 +502,25 @@ export default function App() {
   const [hasSucceeded, setHasSucceeded] = useState(false);
   const [result, setResult] = useState<TriagePlan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paneVisible, setPaneVisible] = useState(true);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
+  function handleSampleSelect(s: Sample) {
+    setRepo(s.repo);
+    setTitle(s.title);
+    setBody(s.body);
+  }
+
+  async function doTriage() {
+    if (loading || !title.trim()) return;
+
+    // Fade out current content
+    setPaneVisible(false);
+    await sleep(200);
 
     setLoading(true);
     setResult(null);
     setError(null);
+    setPaneVisible(true); // skeleton fades in
 
     try {
       const res = await fetch(`${API_BASE}/triage`, {
@@ -392,25 +532,55 @@ export default function App() {
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
         console.error("Triage API error", res.status, detail);
+
+        let msg: string;
         if (res.status === 429) {
-          setError("Rate limit reached. Try again in a few minutes (10/hour, 30/day).");
+          const retryAfter = res.headers.get("Retry-After");
+          const retryMsg = retryAfter
+            ? `Try again in ${Math.ceil(Number(retryAfter) / 60)} minutes`
+            : "Try again in a few minutes";
+          msg = `Rate limit reached. ${retryMsg} (10/hour, 30/day).`;
         } else if (res.status >= 500) {
-          setError("The service hit an internal error. Try again.");
+          msg = "The service hit an internal error. Try again.";
         } else {
-          setError(`Unexpected error: ${res.status}. Try again.`);
+          msg = `Unexpected error: ${res.status}. Try again.`;
         }
+
+        // Skeleton → error
+        setPaneVisible(false);
+        await sleep(150);
+        setLoading(false);
+        setError(msg);
+        await doubleRAF();
+        setPaneVisible(true);
         return;
       }
 
       const data = (await res.json()) as TriagePlan;
+
+      // Skeleton → result
+      setPaneVisible(false);
+      await sleep(150);
+      setLoading(false);
       setResult(data);
       setHasSucceeded(true);
+      await doubleRAF();
+      setPaneVisible(true);
     } catch (err) {
       console.error("Triage network error", err);
-      setError("Could not reach the triage service. Check your connection or try again.");
-    } finally {
+
+      setPaneVisible(false);
+      await sleep(150);
       setLoading(false);
+      setError("Could not reach the triage service. Check your connection or try again.");
+      await doubleRAF();
+      setPaneVisible(true);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void doTriage();
   }
 
   const submitLabel = loading
@@ -419,12 +589,13 @@ export default function App() {
       : "Waking up service… (~25s)"
     : "Triage";
 
+  const isDisabledForTitle = !title.trim() && !loading;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Page header */}
       <header className="border-b border-border bg-background px-4 py-3 sm:py-4">
         <div className="mx-auto max-w-screen-xl flex items-center gap-4">
-          {/* Spacer — mirrors toggle width to keep title centred */}
           <div className="h-8 w-8 shrink-0" />
           <div className="flex-1 text-center">
             <h1 className="text-base sm:text-lg font-semibold tracking-tight text-foreground">
@@ -441,7 +612,7 @@ export default function App() {
       {/* Two-column layout */}
       <main className="mx-auto max-w-screen-xl px-3 py-4 sm:px-4 sm:py-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          {/* LEFT: form — fixed width on desktop */}
+          {/* LEFT: form */}
           <div className="w-full lg:w-96 lg:shrink-0">
             <Card>
               <CardHeader>
@@ -451,26 +622,40 @@ export default function App() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <SamplesPopover onSelect={handleSampleSelect} />
+                <form onSubmit={handleSubmit} className="mt-3 space-y-4">
+                  {/* Repo selector */}
                   <div className="space-y-1">
                     <Label htmlFor="repo">Repository</Label>
                     <Select
                       value={repo}
                       onValueChange={(v) => setRepo(v as Repo)}
                     >
-                      <SelectTrigger id="repo">
-                        <SelectValue />
+                      <SelectTrigger id="repo" className="w-full">
+                        <SelectValue>
+                          {(v: string) => v || "Select repository"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {REPOS.map((r) => (
-                          <SelectItem key={r} value={r}>
+                          <SelectItem key={r} value={r} label={r}>
                             {r}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    <a
+                      href={`https://github.com/${repo}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 flex items-center gap-1 text-xs text-brand hover:underline w-fit"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      github.com/{repo}
+                    </a>
                   </div>
 
+                  {/* Title */}
                   <div className="space-y-1">
                     <Label htmlFor="title">Issue title *</Label>
                     <Input
@@ -478,10 +663,13 @@ export default function App() {
                       placeholder="e.g. Editor crashes when opening large JSON files"
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
+                      maxLength={TITLE_MAX}
                       required
                     />
+                    <CharCounter current={title.length} max={TITLE_MAX} />
                   </div>
 
+                  {/* Body */}
                   <div className="space-y-1">
                     <Label htmlFor="body">Issue body</Label>
                     <Textarea
@@ -489,39 +677,64 @@ export default function App() {
                       placeholder="Describe the bug, steps to reproduce, environment…"
                       value={body}
                       onChange={(e) => setBody(e.target.value)}
+                      maxLength={BODY_MAX}
                       rows={6}
                     />
+                    <CharCounter current={body.length} max={BODY_MAX} />
                   </div>
 
-                  <Button
-                    type="submit"
-                    disabled={loading || !title.trim()}
-                    className="w-full bg-brand text-white hover:bg-brand/90 focus-visible:ring-brand/50 disabled:opacity-50"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {submitLabel}
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="mr-2 h-4 w-4" />
-                        {submitLabel}
-                      </>
-                    )}
-                  </Button>
+                  {/* Submit — wrapped in tooltip when title is empty */}
+                  <Tooltip disabled={!isDisabledForTitle}>
+                    <TooltipTrigger className="block w-full">
+                      <Button
+                        type="submit"
+                        disabled={loading || !title.trim()}
+                        className="w-full bg-brand text-white hover:bg-brand/90 focus-visible:ring-brand/50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {submitLabel}
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="mr-2 h-4 w-4" />
+                            {submitLabel}
+                          </>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Enter an issue title to triage
+                    </TooltipContent>
+                  </Tooltip>
                 </form>
               </CardContent>
             </Card>
           </div>
 
-          {/* RIGHT: result / skeleton / empty state */}
-          <div className="min-w-0 flex-1">
+          {/* RIGHT: result / skeleton / empty state — fades on transition */}
+          <div
+            className={`min-w-0 flex-1 transition-opacity duration-200 ${
+              paneVisible ? "opacity-100" : "opacity-0"
+            }`}
+          >
             {loading && <TriagePlanSkeleton />}
             {!loading && error && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{error}</AlertDescription>
+                <AlertAction>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void doTriage()}
+                    className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    Try again
+                  </Button>
+                </AlertAction>
               </Alert>
             )}
             {!loading && result && <TriagePlanCard plan={result} repo={repo} />}
