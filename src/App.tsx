@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
@@ -40,6 +41,9 @@ import {
   Trash2,
   Zap,
 } from "lucide-react";
+import { ConfidenceBadge } from "./components/ConfidenceBadge";
+import { UnderTheHood } from "./components/UnderTheHood";
+import Eval from "./pages/Eval";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
 
@@ -75,6 +79,10 @@ interface TriagePlan {
   triage_summary: string;
   _request_id: string;
   _llm_status: string;
+  resolution_bucket?: string;
+  resolution_confidence_pct?: number;
+  classifier_top3?: Array<{ label: string; confidence: number }>;
+  _llm_cache_hit?: boolean | null;
 }
 
 interface Sample {
@@ -590,6 +598,7 @@ function TriagePlanCard({
               lower={plan.expected_resolution_lower_days}
               upper={plan.expected_resolution_upper_days}
             />
+            <ConfidenceBadge pct={plan.resolution_confidence_pct ?? 100} />
           </div>
 
           <div className="space-y-1.5">
@@ -647,6 +656,17 @@ function TriagePlanCard({
           )}
         </div>
 
+        <UnderTheHood
+          classifierTop3={plan.classifier_top3}
+          similarIssues={plan.similar_issues}
+          resolutionLower={plan.expected_resolution_lower_days}
+          resolutionUpper={plan.expected_resolution_upper_days}
+          resolutionConfidencePct={plan.resolution_confidence_pct}
+          resolutionBucket={plan.resolution_bucket}
+          llmStatus={plan._llm_status}
+          llmCacheHit={plan._llm_cache_hit}
+        />
+
         <details className="border-t border-border pt-3">
           <summary className="cursor-pointer select-none text-xs text-muted-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:text-foreground hover:decoration-foreground transition-colors">
             Raw JSON · request {plan._request_id.slice(0, 8)}… · {plan._llm_status}
@@ -664,7 +684,7 @@ function TriagePlanCard({
 // App
 // ---------------------------------------------------------------------------
 
-export default function App() {
+function MainPage() {
   const urlParams = readUrlParams();
 
   const [repo, setRepo] = useState<Repo>(urlParams.repo ?? "microsoft/vscode");
@@ -829,7 +849,15 @@ export default function App() {
               ML-powered GitHub issue triage — component, priority, resolution time
             </p>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-3 shrink-0 self-center">
+            <Link
+              to="/eval"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground"
+            >
+              Eval
+            </Link>
+            <ThemeToggle />
+          </div>
         </div>
       </header>
 
@@ -988,6 +1016,13 @@ export default function App() {
       {/* Footer */}
       <footer className="border-t border-border py-4 px-4 mt-auto">
         <div className="mx-auto max-w-screen-xl text-center text-xs text-muted-foreground">
+          <Link
+            to="/eval"
+            className="text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors"
+          >
+            Eval methodology
+          </Link>
+          {" · "}
           Built by{" "}
           <a
             href="https://github.com/gaurav-gandhi-2411"
@@ -1018,5 +1053,16 @@ export default function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<MainPage />} />
+        <Route path="/eval" element={<Eval />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
