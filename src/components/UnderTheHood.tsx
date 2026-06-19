@@ -137,7 +137,7 @@ export function UnderTheHood({
           <Stage
             number={3}
             title="Resolution Estimator"
-            subtitle="LightGBM quantile regression, ~77% interval coverage on k8s"
+            subtitle="LightGBM quantile regression, ~75% interval coverage on k8s"
           >
             <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
@@ -150,17 +150,13 @@ export function UnderTheHood({
                   <DataRow
                     label="Bucket confidence"
                     value={`${resolutionConfidencePct.toFixed(1)}%`}
-                    highlight={resolutionConfidencePct < 40}
                   />
                 )}
               </div>
-              {resolutionConfidencePct !== undefined && resolutionConfidencePct < 40 && (
-                <p className="text-xs text-amber-700 dark:text-amber-400 italic">
-                  Low confidence — no creation-time signal for this repo. Falling back to naive prior.
-                </p>
-              )}
               <p className="mt-1 text-xs text-muted-foreground/70 italic">
-                Trained on a created_at temporal split after leakage retraction (ADR-0009).
+                Per-issue confidence from the retrained bucket classifier. Trained on a created_at
+                temporal split after leakage retraction (ADR-0009). The "Model below naive baseline"
+                badge (if shown) reflects a repo-level evaluation finding — see /eval.
               </p>
             </div>
           </Stage>

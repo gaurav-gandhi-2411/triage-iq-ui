@@ -3,12 +3,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Props {
-  pct: number;
+  beatsNaive: boolean;
   className?: string;
 }
 
-export function ConfidenceBadge({ pct, className }: Props) {
-  if (pct >= 40) return null;
+export function ConfidenceBadge({ beatsNaive, className }: Props) {
+  if (beatsNaive) return null;
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="cursor-default" />}>
@@ -18,14 +18,14 @@ export function ConfidenceBadge({ pct, className }: Props) {
             className,
           )}
         >
-          Low signal — naive prior
+          Model below naive baseline
         </Badge>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs text-xs leading-relaxed" side="bottom">
-        No creation-time signal predicts resolution time for this repo. The system detects
-        this (interval coverage {Math.round(pct)}%, confidence &lt; 40%) and falls back to
-        the naive prior rather than shipping a less accurate prediction. Resolution estimates
-        for this issue are approximate.
+        This repository's resolution model underperforms a naive median predictor in evaluation.
+        This is a repo-level finding — the system surfaces it here rather than silently presenting
+        a less accurate prediction. Per-issue bucket confidence is shown in "Under the Hood".
+        See /eval for methodology and numbers.
       </TooltipContent>
     </Tooltip>
   );

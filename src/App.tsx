@@ -83,6 +83,7 @@ interface TriagePlan {
   resolution_confidence_pct?: number;
   classifier_top3?: Array<{ label: string; confidence: number }>;
   _llm_cache_hit?: boolean | null;
+  resolution_model_beats_naive?: boolean;
 }
 
 interface Sample {
@@ -598,7 +599,7 @@ function TriagePlanCard({
               lower={plan.expected_resolution_lower_days}
               upper={plan.expected_resolution_upper_days}
             />
-            <ConfidenceBadge pct={plan.resolution_confidence_pct ?? 100} />
+            <ConfidenceBadge beatsNaive={plan.resolution_model_beats_naive ?? true} />
           </div>
 
           <div className="space-y-1.5">
