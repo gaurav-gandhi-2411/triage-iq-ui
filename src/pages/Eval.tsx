@@ -9,6 +9,19 @@ import { Moon, Sun, Monitor, ArrowLeft, ExternalLink } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
 
+interface ConformalRepoStats {
+  calibration_split: string;
+  q_adjustment_hours: number;
+  q_adjustment_days: number;
+  empirical_coverage: number;
+  coverage_ci95_lower: number;
+  coverage_ci95_upper: number;
+  raw_interval_coverage: number;
+  median_width_raw_days: number;
+  median_width_conformal_days: number;
+  exchangeability_note?: string;
+}
+
 interface EvalSummary {
   leakage: {
     feature_removed: string;
@@ -77,6 +90,15 @@ interface EvalSummary {
     phase2_delta_pp: string;
     phase2_ci_95: string;
     phase2_verdict: string;
+  };
+  conformal?: {
+    method: string;
+    target_coverage: number;
+    caveats: string;
+    by_repo: {
+      "kubernetes/kubernetes": ConformalRepoStats;
+      "microsoft/vscode": ConformalRepoStats;
+    };
   };
 }
 
@@ -491,6 +513,134 @@ export default function Eval() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Section 5: Conformal Intervals */}
+            {data.conformal && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <span>5 · Conformal Intervals (CQR)</span>
+                    <Badge className="border border-purple-300 bg-purple-50 text-purple-700 text-xs dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                      ADR-0010
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-md bg-muted/50 px-4 py-3 text-xs space-y-1">
+                    <p>
+                      <span className="font-medium">Method:</span> {data.conformal.method}
+                    </p>
+                    <p className="text-muted-foreground">{data.conformal.caveats}</p>
+                  </div>
+
+                  {/* Coverage table */}
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                      Empirical coverage (held-out test set, with 95% Wilson CI)
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Repo</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Target</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Empirical</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">95% Wilson CI</th>
+                            <th className="py-2 text-left text-xs font-medium text-muted-foreground">Raw (no CQR)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(
+                            [
+                              ["k8s", "kubernetes/kubernetes"],
+                              ["vscode", "microsoft/vscode"],
+                            ] as const
+                          ).map(([label, key]) => {
+                            const r = data.conformal!.by_repo[key];
+                            return (
+                              <tr key={key} className="border-b border-border/50 last:border-0">
+                                <td className="py-1.5 pr-4 text-xs font-mono">{label}</td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums text-muted-foreground">
+                                  {(data.conformal!.target_coverage * 100).toFixed(0)}%
+                                </td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums font-medium text-foreground">
+                                  {(r.empirical_coverage * 100).toFixed(1)}%
+                                </td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums font-mono text-muted-foreground">
+                                  [{(r.coverage_ci95_lower * 100).toFixed(1)}%,{" "}
+                                  {(r.coverage_ci95_upper * 100).toFixed(1)}%]
+                                </td>
+                                <td className="py-1.5 text-xs tabular-nums text-muted-foreground">
+                                  {(r.raw_interval_coverage * 100).toFixed(1)}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Width comparison */}
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                      Interval width — raw vs conformal
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Repo</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Raw median</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Conformal median</th>
+                            <th className="py-2 text-left text-xs font-medium text-muted-foreground">Q (hours added)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(
+                            [
+                              ["k8s", "kubernetes/kubernetes"],
+                              ["vscode", "microsoft/vscode"],
+                            ] as const
+                          ).map(([label, key]) => {
+                            const r = data.conformal!.by_repo[key];
+                            return (
+                              <tr key={key} className="border-b border-border/50 last:border-0">
+                                <td className="py-1.5 pr-4 text-xs font-mono">{label}</td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums">
+                                  {r.median_width_raw_days.toFixed(1)}d
+                                </td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums font-medium">
+                                  {r.median_width_conformal_days.toFixed(1)}d
+                                </td>
+                                <td className="py-1.5 text-xs tabular-nums text-muted-foreground font-mono">
+                                  +{r.q_adjustment_hours.toFixed(2)}h
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* vscode exchangeability note */}
+                  {data.conformal.by_repo["microsoft/vscode"].exchangeability_note && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 leading-relaxed space-y-1">
+                      <p>
+                        <strong>vscode temporal drift:</strong>{" "}
+                        {data.conformal.by_repo["microsoft/vscode"].exchangeability_note}
+                      </p>
+                      <p>
+                        Split sensitivity: 30/70 split yields 68.3% empirical coverage; 40/60
+                        yields 74.1% — a 5.8pp divergence that reflects non-stationarity in the
+                        2026 test window, not calibration noise. See ADR-0010.
+                      </p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </main>

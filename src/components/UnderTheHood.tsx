@@ -23,6 +23,11 @@ interface UnderTheHoodProps {
   resolutionBucket?: string;
   llmStatus: string;
   llmCacheHit?: boolean | null;
+  conformalLower?: number | null;
+  conformalUpper?: number | null;
+  empiricalCoverage?: number | null;
+  coverageCi95Lower?: number | null;
+  coverageCi95Upper?: number | null;
 }
 
 export function UnderTheHood({
@@ -34,6 +39,11 @@ export function UnderTheHood({
   resolutionBucket,
   llmStatus,
   llmCacheHit,
+  conformalLower,
+  conformalUpper,
+  empiricalCoverage,
+  coverageCi95Lower,
+  coverageCi95Upper,
 }: UnderTheHoodProps) {
   const [open, setOpen] = useState(false);
 
@@ -137,12 +147,12 @@ export function UnderTheHood({
           <Stage
             number={3}
             title="Resolution Estimator"
-            subtitle="LightGBM quantile regression, ~75% interval coverage on k8s"
+            subtitle="LightGBM Q10/Q90 + CQR conformal layer"
           >
             <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
-                <DataRow label="Lower bound" value={`${resolutionLower.toFixed(1)}d`} />
-                <DataRow label="Upper bound" value={`${resolutionUpper.toFixed(1)}d`} />
+                <DataRow label="Q10 (raw lower)" value={`${resolutionLower.toFixed(1)}d`} />
+                <DataRow label="Q90 (raw upper)" value={`${resolutionUpper.toFixed(1)}d`} />
                 {resolutionBucket && (
                   <DataRow label="Bucket" value={resolutionBucket} mono />
                 )}
@@ -153,11 +163,51 @@ export function UnderTheHood({
                   />
                 )}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground/70 italic">
-                Per-issue confidence from the retrained bucket classifier. Trained on a created_at
-                temporal split after leakage retraction (ADR-0009). The "Model below naive baseline"
-                badge (if shown) reflects a repo-level evaluation finding — see /eval.
-              </p>
+
+              {conformalLower != null && conformalUpper != null && (
+                <>
+                  <div className="mt-2 border-t border-border/40 pt-2">
+                    <p className="text-xs font-medium text-foreground mb-1.5">
+                      Conformal interval (CQR)
+                    </p>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                      <DataRow
+                        label="Conformal lower"
+                        value={`${conformalLower.toFixed(1)}d`}
+                        highlight
+                      />
+                      <DataRow
+                        label="Conformal upper"
+                        value={`${conformalUpper.toFixed(1)}d`}
+                        highlight
+                      />
+                      {empiricalCoverage != null && coverageCi95Lower != null && coverageCi95Upper != null && (
+                        <>
+                          <DataRow label="Target coverage" value="80%" />
+                          <DataRow
+                            label="Empirical coverage"
+                            value={`${(empiricalCoverage * 100).toFixed(1)}% [${(coverageCi95Lower * 100).toFixed(1)}%, ${(coverageCi95Upper * 100).toFixed(1)}%]`}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground/70 italic">
+                    Split-conformal CQR (Romano et al. 2019). Empirical marginal coverage measured
+                    on a held-out test set under temporal drift — not a sampling-distribution
+                    guarantee. k8s: 76.6% [74.0%–79.1%]; vscode: 74.1% [69.4%–78.3%] (10-year
+                    train/test gap violates exchangeability). See ADR-0010 and /eval.
+                  </p>
+                </>
+              )}
+
+              {(conformalLower == null || conformalUpper == null) && (
+                <p className="mt-1 text-xs text-muted-foreground/70 italic">
+                  Per-issue confidence from the retrained bucket classifier. Trained on a created_at
+                  temporal split after leakage retraction (ADR-0009). The "Model below naive baseline"
+                  badge (if shown) reflects a repo-level evaluation finding — see /eval.
+                </p>
+              )}
             </div>
           </Stage>
 

@@ -84,6 +84,14 @@ interface TriagePlan {
   classifier_top3?: Array<{ label: string; confidence: number }>;
   _llm_cache_hit?: boolean | null;
   resolution_model_beats_naive?: boolean;
+  resolution_interval_conformal?: {
+    lower_days: number;
+    upper_days: number;
+    target_coverage: number;
+    empirical_coverage: number;
+    coverage_ci95_lower: number;
+    coverage_ci95_upper: number;
+  } | null;
 }
 
 interface Sample {
@@ -666,6 +674,11 @@ function TriagePlanCard({
           resolutionBucket={plan.resolution_bucket}
           llmStatus={plan._llm_status}
           llmCacheHit={plan._llm_cache_hit}
+          conformalLower={plan.resolution_interval_conformal?.lower_days}
+          conformalUpper={plan.resolution_interval_conformal?.upper_days}
+          empiricalCoverage={plan.resolution_interval_conformal?.empirical_coverage}
+          coverageCi95Lower={plan.resolution_interval_conformal?.coverage_ci95_lower}
+          coverageCi95Upper={plan.resolution_interval_conformal?.coverage_ci95_upper}
         />
 
         <details className="border-t border-border pt-3">
