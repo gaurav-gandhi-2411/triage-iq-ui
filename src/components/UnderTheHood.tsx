@@ -14,6 +14,17 @@ interface SimilarIssue {
   relevance_note: string;
 }
 
+// Mirrors src/triage_iq/models/triage.py:GroundingStatus. Absent (null/undefined) for
+// older cached responses recorded before grounding verification was wired in — every
+// consumer of this type must handle that gracefully rather than crash. See ADR-0015.
+interface GroundingStatus {
+  component_grounded: boolean;
+  component_reason: string;
+  similar_issue_refs: number[];
+  ungrounded_refs: number[];
+  all_grounded: boolean;
+}
+
 interface UnderTheHoodProps {
   classifierTop3?: ClassifierPrediction[] | null;
   similarIssues: SimilarIssue[];
@@ -28,6 +39,7 @@ interface UnderTheHoodProps {
   empiricalCoverage?: number | null;
   coverageCi95Lower?: number | null;
   coverageCi95Upper?: number | null;
+  groundingStatus?: GroundingStatus | null;
 }
 
 export function UnderTheHood({
@@ -44,6 +56,7 @@ export function UnderTheHood({
   empiricalCoverage,
   coverageCi95Lower,
   coverageCi95Upper,
+  groundingStatus,
 }: UnderTheHoodProps) {
   const [open, setOpen] = useState(false);
 
@@ -100,6 +113,20 @@ export function UnderTheHood({
                 <p className="mt-1 text-xs text-muted-foreground/70 italic">
                   Calibrated via temperature scaling — probabilities reflect true frequencies, not raw logit scores.
                 </p>
+                {groundingStatus && (
+                  <p
+                    className={cn(
+                      "mt-1 text-xs font-medium",
+                      groundingStatus.component_grounded
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : "text-amber-700 dark:text-amber-400",
+                    )}
+                  >
+                    {groundingStatus.component_grounded
+                      ? `✓ grounded in classifier top-3 (${groundingStatus.component_reason})`
+                      : `⚠ unverified — ${groundingStatus.component_reason}`}
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">Top-3 predictions not available.</p>
@@ -116,22 +143,42 @@ export function UnderTheHood({
           >
             {similarIssues.length > 0 ? (
               <div className="space-y-1">
-                {similarIssues.map((iss) => (
-                  <div key={iss.number} className="flex items-center gap-2">
-                    <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground">
-                      #{iss.number}
-                    </span>
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-muted-foreground/40"
-                        style={{ width: `${Math.round(iss.similarity * 100)}%` }}
-                      />
+                {similarIssues.map((iss) => {
+                  const isUngrounded = groundingStatus?.ungrounded_refs.includes(iss.number);
+                  return (
+                    <div key={iss.number} className="flex items-center gap-2">
+                      <span className="w-12 shrink-0 font-mono text-xs text-muted-foreground">
+                        #{iss.number}
+                      </span>
+                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-muted-foreground/40"
+                          style={{ width: `${Math.round(iss.similarity * 100)}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">
+                        {Math.round(iss.similarity * 100)}%
+                      </span>
+                      {groundingStatus && (
+                        <span
+                          className={cn(
+                            "shrink-0 text-xs font-medium",
+                            isUngrounded
+                              ? "text-amber-700 dark:text-amber-400"
+                              : "text-emerald-700 dark:text-emerald-400",
+                          )}
+                        >
+                          {isUngrounded ? "⚠ unverified" : "✓"}
+                        </span>
+                      )}
                     </div>
-                    <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">
-                      {Math.round(iss.similarity * 100)}%
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
+                {groundingStatus && groundingStatus.ungrounded_refs.length > 0 && (
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                    ⚠ unverified — not in retrieval results: {groundingStatus.ungrounded_refs.map((n) => `#${n}`).join(", ")}
+                  </p>
+                )}
                 <p className="mt-1 text-xs text-muted-foreground/70 italic">
                   Cosine similarity scores from the FAISS k-NN index. Reranker evaluated but rejected (CI crosses zero at n=300 — see Eval).
                 </p>
