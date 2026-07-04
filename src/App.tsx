@@ -65,6 +65,25 @@ interface SimilarIssue {
   relevance_note: string;
 }
 
+// Mirrors src/triage_iq/models/triage.py:GroundingAttribution. Reconstruction of what the
+// LLM already claimed (component + similar-issue refs), not new attribution elicited from a
+// prompt change. See ADR-0015.
+interface GroundingAttribution {
+  component_source: string;
+  similar_issue_refs: number[];
+}
+
+// Mirrors src/triage_iq/models/triage.py:GroundingStatus — deterministic verification of the
+// plan's claims against this pipeline's own classifier_top3 / retrieval outputs for this
+// request. Not verification against world/ground truth. See ADR-0015.
+interface GroundingStatus {
+  component_grounded: boolean;
+  component_reason: string;
+  similar_issue_refs: number[];
+  ungrounded_refs: number[];
+  all_grounded: boolean;
+}
+
 interface TriagePlan {
   predicted_component: string;
   component_confidence: number;
@@ -92,6 +111,8 @@ interface TriagePlan {
     coverage_ci95_lower: number;
     coverage_ci95_upper: number;
   } | null;
+  grounding?: GroundingAttribution | null;
+  grounding_status?: GroundingStatus | null;
 }
 
 interface Sample {
@@ -679,6 +700,7 @@ function TriagePlanCard({
           empiricalCoverage={plan.resolution_interval_conformal?.empirical_coverage}
           coverageCi95Lower={plan.resolution_interval_conformal?.coverage_ci95_lower}
           coverageCi95Upper={plan.resolution_interval_conformal?.coverage_ci95_upper}
+          groundingStatus={plan.grounding_status}
         />
 
         <details className="border-t border-border pt-3">
