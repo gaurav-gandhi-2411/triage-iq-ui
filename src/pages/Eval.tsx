@@ -107,7 +107,6 @@ export default function Eval() {
   const [error, setError] = useState<string | null>(null);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useState(() => { setMounted(true); });
 
   useEffect(() => {
