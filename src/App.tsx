@@ -246,7 +246,6 @@ function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useState(() => { setMounted(true); });
 
   if (!mounted) return <div className="size-8 shrink-0 self-center" />;
