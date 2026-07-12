@@ -22,3 +22,6 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: npm audit (non-blocking)
+        run: npm audit --audit-level=high
+        continue-on-error: true
