@@ -2,27 +2,11 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import type { SimilarIssue, GroundingStatus } from "@/lib/types";
 
 interface ClassifierPrediction {
   label: string;
   confidence: number;
-}
-
-interface SimilarIssue {
-  number: number;
-  similarity: number;
-  relevance_note: string;
-}
-
-// Mirrors src/triage_iq/models/triage.py:GroundingStatus. Absent (null/undefined) for
-// older cached responses recorded before grounding verification was wired in — every
-// consumer of this type must handle that gracefully rather than crash. See ADR-0015.
-interface GroundingStatus {
-  component_grounded: boolean;
-  component_reason: string;
-  similar_issue_refs: number[];
-  ungrounded_refs: number[];
-  all_grounded: boolean;
 }
 
 interface UnderTheHoodProps {
