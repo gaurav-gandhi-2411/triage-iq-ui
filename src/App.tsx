@@ -42,8 +42,10 @@ import {
   Zap,
 } from "lucide-react";
 import { ConfidenceBadge } from "./components/ConfidenceBadge";
+import { ResolutionBucketBadge } from "./components/ResolutionBucketBadge";
 import { UnderTheHood } from "./components/UnderTheHood";
 import Eval from "./pages/Eval";
+import type { TriagePlan, SimilarIssue } from "@/lib/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
 
@@ -58,62 +60,8 @@ const HISTORY_MAX = 10;
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface SimilarIssue {
-  number: number;
-  similarity: number;
-  relevance_note: string;
-}
-
-// Mirrors src/triage_iq/models/triage.py:GroundingAttribution. Reconstruction of what the
-// LLM already claimed (component + similar-issue refs), not new attribution elicited from a
-// prompt change. See ADR-0015.
-interface GroundingAttribution {
-  component_source: string;
-  similar_issue_refs: number[];
-}
-
-// Mirrors src/triage_iq/models/triage.py:GroundingStatus — deterministic verification of the
-// plan's claims against this pipeline's own classifier_top3 / retrieval outputs for this
-// request. Not verification against world/ground truth. See ADR-0015.
-interface GroundingStatus {
-  component_grounded: boolean;
-  component_reason: string;
-  similar_issue_refs: number[];
-  ungrounded_refs: number[];
-  all_grounded: boolean;
-}
-
-interface TriagePlan {
-  predicted_component: string;
-  component_confidence: number;
-  similar_issues: SimilarIssue[];
-  expected_resolution_summary: string;
-  expected_resolution_lower_days: number;
-  expected_resolution_upper_days: number;
-  priority_guess: "low" | "medium" | "high";
-  priority_rationale: string;
-  suggested_assignee_class: string;
-  suggested_next_steps: string[];
-  triage_summary: string;
-  _request_id: string;
-  _llm_status: string;
-  resolution_bucket?: string;
-  resolution_confidence_pct?: number;
-  classifier_top3?: Array<{ label: string; confidence: number }>;
-  _llm_cache_hit?: boolean | null;
-  resolution_model_beats_naive?: boolean;
-  resolution_interval_conformal?: {
-    lower_days: number;
-    upper_days: number;
-    target_coverage: number;
-    empirical_coverage: number;
-    coverage_ci95_lower: number;
-    coverage_ci95_upper: number;
-  } | null;
-  grounding?: GroundingAttribution | null;
-  grounding_status?: GroundingStatus | null;
-}
+// TriagePlan, SimilarIssue, GroundingAttribution, GroundingStatus now live in
+// ./lib/types.ts, derived from the generated OpenAPI schema (npm run codegen:types).
 
 interface Sample {
   repo: Repo;
@@ -627,6 +575,10 @@ function TriagePlanCard({
               lower={plan.expected_resolution_lower_days}
               upper={plan.expected_resolution_upper_days}
             />
+            <ResolutionBucketBadge
+              bucket={plan.resolution_bucket}
+              confidencePct={plan.resolution_confidence_pct}
+            />
             <ConfidenceBadge beatsNaive={plan.resolution_model_beats_naive ?? true} />
           </div>
 
@@ -671,13 +623,13 @@ function TriagePlanCard({
             </div>
           )}
 
-          {plan.similar_issues.length > 0 && (
+          {(plan.similar_issues ?? []).length > 0 && (
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Similar issues
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {plan.similar_issues.map((iss) => (
+                {(plan.similar_issues ?? []).map((iss) => (
                   <SimilarIssueCard key={iss.number} issue={iss} repo={repo} />
                 ))}
               </div>
@@ -687,7 +639,7 @@ function TriagePlanCard({
 
         <UnderTheHood
           classifierTop3={plan.classifier_top3}
-          similarIssues={plan.similar_issues}
+          similarIssues={plan.similar_issues ?? []}
           resolutionLower={plan.expected_resolution_lower_days}
           resolutionUpper={plan.expected_resolution_upper_days}
           resolutionConfidencePct={plan.resolution_confidence_pct}
