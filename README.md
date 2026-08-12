@@ -2,7 +2,7 @@
 
 React frontend for [TriageIQ](https://github.com/gaurav-gandhi-2411/triage-iq) — ML-powered GitHub issue triage assistant.
 
-**Live API:** `https://triageiq-api-242393598566.us-central1.run.app`
+**Live API:** `https://triageiq-api-1014562031321.us-central1.run.app`
 
 ---
 
@@ -37,7 +37,7 @@ Vite loads `.local` files after the base file and they take precedence. To point
 # Run once — creates .env.development.local (gitignored, never committed)
 [System.IO.File]::WriteAllText(
   "$PWD\.env.development.local",
-  "VITE_API_BASE_URL=https://triageiq-api-242393598566.us-central1.run.app`n",
+  "VITE_API_BASE_URL=https://triageiq-api-1014562031321.us-central1.run.app`n",
   [System.Text.UTF8Encoding]::new($false)
 )
 ```

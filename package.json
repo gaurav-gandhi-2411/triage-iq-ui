@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "codegen:types": "openapi-typescript https://triageiq-api-242393598566.us-central1.run.app/openapi.json -o src/lib/api-schema.ts"
+    "codegen:types": "openapi-typescript https://triageiq-api-1014562031321.us-central1.run.app/openapi.json -o src/lib/api-schema.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
