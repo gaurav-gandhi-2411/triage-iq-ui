@@ -1030,7 +1030,7 @@ function MainPage() {
           </a>
           {" · "}
           <a
-            href="https://triageiq-api-242393598566.us-central1.run.app/docs"
+            href={`${API_BASE}/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-foreground underline decoration-1 underline-offset-4 decoration-muted-foreground hover:decoration-foreground transition-colors"
