@@ -248,7 +248,7 @@ export function UnderTheHood({
           <Stage
             number={4}
             title="LLM Synthesis"
-            subtitle="Groq llama-3.1-8b-instant, response-cached"
+            subtitle="Groq openai/gpt-oss-20b, response-cached"
           >
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
               <DataRow
