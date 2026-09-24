@@ -20,6 +20,8 @@ export type TriagePlan = components["schemas"]["TriagePlan"] & {
   _request_id: string;
   _llm_status: string;
   _llm_cache_hit?: boolean | null;
+  // The LLM that produced this plan (API 2026-09-24). Optional: older API revisions omit it.
+  _model?: string | null;
   classifier_top3?: Array<{ label: string; confidence: number }>;
   resolution_model_beats_naive?: boolean;
 };

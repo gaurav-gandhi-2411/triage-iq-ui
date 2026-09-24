@@ -9,6 +9,21 @@ interface ClassifierPrediction {
   confidence: number;
 }
 
+// /eval/summary's current_llm_baseline block (API 2026-09-24), read from the committed
+// reports/eval_baseline.json so the judge score is data, not hardcoded copy.
+interface LlmBaseline {
+  judge_model: string | null;
+  overall: { n: number; mean: number } | null;
+}
+
+type BaselineState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; baseline: LlmBaseline }
+  | { kind: "unavailable" };
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL as string;
+
 interface UnderTheHoodProps {
   classifierTop3?: ClassifierPrediction[] | null;
   similarIssues: SimilarIssue[];
@@ -18,6 +33,7 @@ interface UnderTheHoodProps {
   resolutionBucket?: string;
   llmStatus: string;
   llmCacheHit?: boolean | null;
+  model?: string | null;
   conformalLower?: number | null;
   conformalUpper?: number | null;
   empiricalCoverage?: number | null;
@@ -35,6 +51,7 @@ export function UnderTheHood({
   resolutionBucket,
   llmStatus,
   llmCacheHit,
+  model,
   conformalLower,
   conformalUpper,
   empiricalCoverage,
@@ -43,12 +60,29 @@ export function UnderTheHood({
   groundingStatus,
 }: UnderTheHoodProps) {
   const [open, setOpen] = useState(false);
+  const [baseline, setBaseline] = useState<BaselineState>({ kind: "idle" });
+
+  // Fetched once, the first time the panel is opened (from the click, not an effect).
+  function loadBaseline() {
+    if (baseline.kind !== "idle") return;
+    setBaseline({ kind: "loading" });
+    fetch(`${API_BASE}/eval/summary`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const b = d?.current_llm_baseline as LlmBaseline | null | undefined;
+        setBaseline(b?.overall ? { kind: "ready", baseline: b } : { kind: "unavailable" });
+      })
+      .catch(() => setBaseline({ kind: "unavailable" }));
+  }
 
   return (
     <div className="border-t border-border pt-3">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) loadBaseline();
+          setOpen((o) => !o);
+        }}
         className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors select-none"
       >
         <span className="font-medium uppercase tracking-wide">Under the hood</span>
@@ -248,7 +282,7 @@ export function UnderTheHood({
           <Stage
             number={4}
             title="LLM Synthesis"
-            subtitle="Groq openai/gpt-oss-20b, response-cached"
+            subtitle={model ? `Groq ${model}, response-cached` : "Groq (model not reported), response-cached"}
           >
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
               <DataRow
@@ -265,7 +299,11 @@ export function UnderTheHood({
               />
             </div>
             <p className="mt-1 text-xs text-muted-foreground/70 italic">
-              Cross-family LLM-as-judge score: 10.93/15 (72.9%) — see Eval for methodology.
+              {baseline.kind === "ready" && baseline.baseline.overall
+                ? `LLM-as-judge baseline (${baseline.baseline.judge_model ?? "judge"}, n=${baseline.baseline.overall.n}): ${baseline.baseline.overall.mean.toFixed(2)}/15 (${((baseline.baseline.overall.mean / 15) * 100).toFixed(1)}%) — see Eval for methodology.`
+                : baseline.kind === "unavailable"
+                  ? "LLM-as-judge baseline unavailable — see Eval for methodology."
+                  : "Loading LLM-as-judge baseline…"}
             </p>
           </Stage>
         </div>
