@@ -22,6 +22,18 @@ interface ConformalRepoStats {
   exchangeability_note?: string;
 }
 
+interface CurrentLlmBaseline {
+  judge_model?: string | null;
+  overall?: { n: number; mean: number } | null;
+  per_repo?: Record<
+    string,
+    { n?: number | null; mean?: number | null; fabrication_rate?: number | null; floor_fail_rate?: number | null }
+  >;
+  cassette_hash?: string;
+}
+
+const JUDGE_MAX_SCORE = 15;
+
 interface EvalSummary {
   leakage: {
     feature_removed: string;
@@ -66,22 +78,15 @@ interface EvalSummary {
       };
     };
   };
-  judge: {
-    production_judge_model: string;
-    cross_family_judge_model: string;
-    n_issues_evaluated: number;
-    w1_1_pre_calibration: { score: number; score_pct: number; max: number };
-    w1_2_post_calibration: { score: number; score_pct: number; max: number; delta_vs_w1_1: string };
-    production_llama_score: { score: number; score_pct: number; max: number };
-    cross_family_validation: {
-      cohere_score: number;
-      llama_score: number;
-      gap_pp: number;
-      pearson_r: number;
-      decision: string;
-    };
-    dimensions: Record<string, { max: number; production_mean: number }>;
+  // Old API shape (pre-2026-10) also carries stale W1-era keys (cross_family_*, w1_*,
+  // production_llama_score, dimensions[*].production_mean). They are deliberately NOT typed or
+  // read: the judge section renders only current_llm_baseline + judge.per_repo[*].dimensions.
+  judge?: {
+    production_judge_model?: string;
+    dimension_max?: Record<string, number>;
+    per_repo?: Record<string, { dimensions?: Record<string, number> }>;
   };
+  current_llm_baseline?: CurrentLlmBaseline | null;
   reranker: {
     model_tested: string;
     phase2_robustness_n: number;
@@ -120,6 +125,13 @@ export default function Eval() {
         setError(e instanceof Error ? e.message : "Failed to load");
       });
   }, []);
+
+  const baseline = data?.current_llm_baseline ?? null;
+  // Dimensions come ONLY from judge.per_repo[*].dimensions (new API). The old API's
+  // judge.dimensions[*].production_mean are stale n=65 values and are never read.
+  const dimensionRepos = Object.entries(data?.judge?.per_repo ?? {}).flatMap(([repo, r]) =>
+    r?.dimensions && Object.keys(r.dimensions).length > 0 ? [[repo, r.dimensions] as const] : [],
+  );
 
   const nextTheme = theme === "light" ? "dark" : theme === "dark" ? "system" : "light";
   const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
@@ -360,98 +372,109 @@ export default function Eval() {
               </CardContent>
             </Card>
 
-            {/* Section 3: Judge Evaluation */}
+            {/* Section 3: Judge Evaluation (current baseline only; retired-judge history removed) */}
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <span>3 · LLM-as-Judge Evaluation</span>
                   <Badge className="border border-blue-300 bg-blue-50 text-blue-700 text-xs dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                    ADR-0003 · ADR-0004
+                    ADR-0019
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="rounded-md bg-muted/50 px-4 py-3 text-xs space-y-1">
-                  <p>
-                    <span className="font-medium">Cross-family judge:</span>{" "}
-                    <code className="font-mono">{data.judge.cross_family_judge_model}</code> (Cohere) — not
-                    one model grading its own homework.
-                  </p>
-                  <p>
-                    <span className="font-medium">Production judge:</span>{" "}
-                    <code className="font-mono">{data.judge.production_judge_model}</code> (Groq/Meta). Gap
-                    to Cohere: {data.judge.cross_family_validation.gap_pp}pp, Pearson r ={" "}
-                    {data.judge.cross_family_validation.pearson_r}.
-                  </p>
-                  <p className="text-muted-foreground">{data.judge.cross_family_validation.decision}</p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="border-b border-border">
-                        <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Phase</th>
-                        <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Judge</th>
-                        <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Score /15</th>
-                        <th className="py-2 text-left text-xs font-medium text-muted-foreground">%</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b border-border/50">
-                        <td className="py-1.5 pr-4 text-xs text-muted-foreground">W1.1 (pre-calibration)</td>
-                        <td className="py-1.5 pr-4 text-xs font-mono">cohere</td>
-                        <td className="py-1.5 pr-4 text-xs tabular-nums">
-                          {data.judge.w1_1_pre_calibration.score.toFixed(2)}
-                        </td>
-                        <td className="py-1.5 text-xs tabular-nums">
-                          {data.judge.w1_1_pre_calibration.score_pct.toFixed(1)}%
-                        </td>
-                      </tr>
-                      <tr className="border-b border-border/50">
-                        <td className="py-1.5 pr-4 text-xs text-muted-foreground">W1.2 (post-calibration)</td>
-                        <td className="py-1.5 pr-4 text-xs font-mono">cohere</td>
-                        <td className="py-1.5 pr-4 text-xs tabular-nums font-medium">
-                          {data.judge.w1_2_post_calibration.score.toFixed(2)}
-                        </td>
-                        <td className="py-1.5 text-xs tabular-nums font-medium">
-                          {data.judge.w1_2_post_calibration.score_pct.toFixed(1)}%
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="py-1.5 pr-4 text-xs text-muted-foreground">Production (Llama-70b)</td>
-                        <td className="py-1.5 pr-4 text-xs font-mono">llama</td>
-                        <td className="py-1.5 pr-4 text-xs tabular-nums font-medium text-foreground">
-                          {data.judge.production_llama_score.score.toFixed(2)}
-                        </td>
-                        <td className="py-1.5 text-xs tabular-nums font-medium">
-                          {data.judge.production_llama_score.score_pct.toFixed(1)}%
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-                    Per-dimension breakdown (production)
-                  </p>
-                  <div className="space-y-1.5">
-                    {Object.entries(data.judge.dimensions).map(([dim, d]) => (
-                      <div key={dim} className="flex items-center gap-2">
-                        <span className="w-48 shrink-0 text-xs text-muted-foreground truncate">
-                          {dim.replace(/_/g, " ")}
-                        </span>
-                        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-muted-foreground/50"
-                            style={{ width: `${(d.production_mean / d.max) * 100}%` }}
-                          />
-                        </div>
-                        <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
-                          {d.production_mean.toFixed(2)}/{d.max}
-                        </span>
-                      </div>
-                    ))}
+                {!baseline || !baseline.overall ? (
+                  <div className="rounded-md bg-muted/50 px-4 py-3 text-xs text-muted-foreground">
+                    The current judge baseline is not available from the API right now. No score is
+                    shown rather than a stale one.
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="rounded-md bg-muted/50 px-4 py-3 text-xs space-y-1">
+                      <p>
+                        <span className="font-medium">Judge:</span>{" "}
+                        <code className="font-mono">{baseline.judge_model ?? "unknown"}</code> (local
+                        model, zero cost, reproducible without a live key).
+                      </p>
+                      <p>
+                        <span className="font-medium">Current baseline:</span>{" "}
+                        <span className="tabular-nums font-medium text-foreground">
+                          {baseline.overall.mean.toFixed(2)}/{JUDGE_MAX_SCORE}
+                        </span>{" "}
+                        mean over n={baseline.overall.n} gold-set issues (
+                        {((baseline.overall.mean / JUDGE_MAX_SCORE) * 100).toFixed(1)}%).
+                      </p>
+                      <p className="text-muted-foreground">
+                        Scores from earlier judge models (Llama-70b, Cohere Command A) were measured on a
+                        different gold set with a different judge and are not comparable, so they are not
+                        shown here.
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-border">
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Repo</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">n</th>
+                            <th className="py-2 text-left text-xs font-medium text-muted-foreground">
+                              Mean /{JUDGE_MAX_SCORE}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(baseline.per_repo ?? {}).map(([repo, r]) => (
+                            <tr key={repo} className="border-b border-border/50 last:border-0">
+                              <td className="py-1.5 pr-4 text-xs font-mono">{repo}</td>
+                              <td className="py-1.5 pr-4 text-xs tabular-nums">{r.n ?? "n/a"}</td>
+                              <td className="py-1.5 text-xs tabular-nums font-medium">
+                                {r.mean != null ? r.mean.toFixed(2) : "n/a"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {dimensionRepos.length > 0 ? (
+                      <div className="space-y-4">
+                        {dimensionRepos.map(([repo, dims]) => (
+                          <div key={repo}>
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+                              Per-dimension mean — {repo}
+                            </p>
+                            <div className="space-y-1.5">
+                              {Object.entries(dims).map(([dim, mean]) => {
+                                const max = data.judge?.dimension_max?.[dim];
+                                return (
+                                  <div key={dim} className="flex items-center gap-2">
+                                    <span className="w-48 shrink-0 text-xs text-muted-foreground truncate">
+                                      {dim.replace(/_/g, " ")}
+                                    </span>
+                                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                                      {max ? (
+                                        <div
+                                          className="h-full rounded-full bg-muted-foreground/50"
+                                          style={{ width: `${Math.min(100, (mean / max) * 100)}%` }}
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <span className="w-16 text-right text-xs tabular-nums text-muted-foreground">
+                                      {mean.toFixed(2)}
+                                      {max ? `/${max}` : ""}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Per-dimension breakdown is not available from the API yet.
+                      </p>
+                    )}
+                  </>
+                )}
               </CardContent>
             </Card>
 
