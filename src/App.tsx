@@ -156,22 +156,34 @@ function loadHistory(): HistoryEntry[] {
 // URL helpers
 // ---------------------------------------------------------------------------
 
-function readUrlParams(): { repo: Repo | null; title: string; body: string } {
+function readUrlParams(): { repo: Repo | null; title: string; body: string; issue: string } {
   const p = new URLSearchParams(window.location.search);
   const r = p.get("repo");
   return {
     repo: r && (REPOS as readonly string[]).includes(r) ? (r as Repo) : null,
     title: p.get("title") ?? "",
     body: p.get("body") ?? "",
+    issue: p.get("issue") ?? "",
   };
 }
 
-function pushShareUrl(repo: string, title: string, body: string) {
+// Accepts "286776", "#286776" or a GitHub issue URL; anything else is ignored (null).
+function parseIssueNumber(raw: string): number | null {
+  const s = raw.trim();
+  const m = s.match(/^#?(\d+)$/) ?? s.match(/\/issues\/(\d+)(?:[/?#].*)?$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+function pushShareUrl(repo: string, title: string, body: string, issue = "") {
   const url = new URL(window.location.href);
   url.searchParams.set("repo", repo);
   url.searchParams.set("title", title);
   if (body.trim()) url.searchParams.set("body", body);
   else url.searchParams.delete("body");
+  if (parseIssueNumber(issue) !== null) url.searchParams.set("issue", issue.trim());
+  else url.searchParams.delete("issue");
   window.history.replaceState(null, "", url.toString());
 }
 
@@ -646,6 +658,7 @@ function TriagePlanCard({
           resolutionBucket={plan.resolution_bucket}
           llmStatus={plan._llm_status}
           llmCacheHit={plan._llm_cache_hit}
+          model={plan._model}
           conformalLower={plan.resolution_interval_conformal?.lower_days}
           conformalUpper={plan.resolution_interval_conformal?.upper_days}
           empiricalCoverage={plan.resolution_interval_conformal?.empirical_coverage}
@@ -677,6 +690,7 @@ function MainPage() {
   const [repo, setRepo] = useState<Repo>(urlParams.repo ?? "microsoft/vscode");
   const [title, setTitle] = useState(urlParams.title);
   const [body, setBody] = useState(urlParams.body);
+  const [issueNumber, setIssueNumber] = useState(urlParams.issue);
   const [loading, setLoading] = useState(false);
   const [hasSucceeded, setHasSucceeded] = useState(false);
   const [result, setResult] = useState<TriagePlan | null>(null);
@@ -688,6 +702,7 @@ function MainPage() {
     setRepo(s.repo);
     setTitle(s.title);
     setBody(s.body);
+    setIssueNumber("");
   }
 
   function handleCopyLink() {
@@ -714,6 +729,7 @@ function MainPage() {
     await sleep(150);
     setRepo(entry.repo);
     setTitle(entry.title);
+    setIssueNumber("");
     setResult(entry.result);
     setHasSucceeded(true);
     setError(null);
@@ -738,7 +754,14 @@ function MainPage() {
       const res = await fetch(`${API_BASE}/triage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo, title, body }),
+        // issue_number only when the user gave a valid one: the API then leaves the issue
+        // out of its own similar issues (the API also does this for exact text matches).
+        body: JSON.stringify({
+          repo,
+          title,
+          body,
+          ...(parseIssueNumber(issueNumber) !== null ? { issue_number: parseIssueNumber(issueNumber) } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -793,7 +816,7 @@ function MainPage() {
       });
 
       // Update URL for sharing
-      pushShareUrl(repo, title, body);
+      pushShareUrl(repo, title, body, issueNumber);
 
       await doubleRAF();
       setPaneVisible(true);
@@ -906,6 +929,25 @@ function MainPage() {
                       required
                     />
                     <CharCounter current={title.length} max={TITLE_MAX} />
+                  </div>
+
+                  {/* Issue number (optional) */}
+                  <div className="space-y-1">
+                    <Label htmlFor="issue-number">Issue number (optional)</Label>
+                    <Input
+                      id="issue-number"
+                      inputMode="numeric"
+                      placeholder="e.g. 286776, #286776, or the issue URL"
+                      value={issueNumber}
+                      onChange={(e) => setIssueNumber(e.target.value)}
+                      aria-describedby="issue-number-help"
+                      aria-invalid={issueNumber.trim() !== "" && parseIssueNumber(issueNumber) === null}
+                    />
+                    <p id="issue-number-help" className="text-xs text-muted-foreground">
+                      {issueNumber.trim() !== "" && parseIssueNumber(issueNumber) === null
+                        ? "Not a valid issue number or URL; it will be ignored."
+                        : "If this issue already exists on GitHub, it is left out of its own similar issues."}
+                    </p>
                   </div>
 
                   {/* Body */}
