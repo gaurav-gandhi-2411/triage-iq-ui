@@ -20,6 +20,14 @@ interface ConformalRepoStats {
   median_width_raw_days: number;
   median_width_conformal_days: number;
   exchangeability_note?: string;
+  // New API shape only (2026-10): sample sizes + vscode split sensitivity.
+  n_calibration?: number;
+  n_true_test?: number;
+  split_sensitivity?: {
+    split_30_70: { n_calibration: number; n_true_test: number; empirical_coverage: number };
+    split_40_60: { n_calibration: number; n_true_test: number; empirical_coverage: number };
+    divergence_pp: number;
+  };
 }
 
 interface CurrentLlmBaseline {
@@ -32,13 +40,34 @@ interface CurrentLlmBaseline {
   cassette_hash?: string;
 }
 
-const JUDGE_MAX_SCORE = 15;
+// Fallback only: the real max is the sum of judge.dimension_max (2+3+3+1+3+3 = 15), see judgeMaxScore().
+const JUDGE_MAX_SCORE_FALLBACK = 15;
+
+function judgeMaxScore(dimensionMax?: Record<string, number>): number {
+  const vals = Object.values(dimensionMax ?? {});
+  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : JUDGE_MAX_SCORE_FALLBACK;
+}
+
+const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
+const fmtOrNA = (x: number | null | undefined, digits = 4) => (x == null ? "n/a" : x.toFixed(digits));
+
+interface CalibrationRepo {
+  T_opt: number;
+  // null in the new API shape: validation-split ECE was never recorded for the retrained classifier.
+  ece_before_val?: number | null;
+  ece_after_val?: number | null;
+  ece_test: number;
+  ece_eval_set?: number | null;
+}
 
 interface EvalSummary {
   leakage: {
     feature_removed: string;
     removal_reason: string;
     fixed_split: string;
+    // New API shape: fixed_split is the bare name and previous_split carries the old one.
+    // Old shape: fixed_split was "created_at (was: closed_at)".
+    previous_split?: string;
     prior_metrics_invalidated: {
       k8s_improvement_pct: string;
       vscode_improvement_pct: string;
@@ -50,32 +79,30 @@ interface EvalSummary {
         naive_mae_days: number;
         improvement_pct: string;
         ci_coverage: number;
+        n_test?: number;
       };
       vscode: {
         lgbm_mae_days: number;
         naive_mae_days: number;
         improvement_pct: string;
         ci_coverage: number;
+        n_test?: number;
         note: string;
+        bucket_vs_naive_delta_pp?: number;
+        bucket_vs_naive_ci95_pp?: [number, number];
       };
     };
   };
   calibration: {
     method: string;
     test_accuracy_delta_pp: number;
+    classifier?: string;
+    ece_test_definition?: string;
+    ece_eval_set_definition?: string;
+    val_ece_note?: string;
     repos: {
-      microsoft_vscode: {
-        T_opt: number;
-        ece_before_val: number;
-        ece_after_val: number;
-        ece_test: number;
-      };
-      kubernetes_kubernetes: {
-        T_opt: number;
-        ece_before_val: number;
-        ece_after_val: number;
-        ece_test: number;
-      };
+      microsoft_vscode: CalibrationRepo;
+      kubernetes_kubernetes: CalibrationRepo;
     };
   };
   // Old API shape (pre-2026-10) also carries stale W1-era keys (cross_family_*, w1_*,
@@ -90,6 +117,7 @@ interface EvalSummary {
   reranker: {
     model_tested: string;
     phase2_robustness_n: number;
+    phase2_n_bootstrap?: number;
     phase2_baseline_r5: number;
     phase2_reranker_r5: number;
     phase2_delta_pp: string;
@@ -127,6 +155,14 @@ export default function Eval() {
   }, []);
 
   const baseline = data?.current_llm_baseline ?? null;
+  const judgeMax = judgeMaxScore(data?.judge?.dimension_max);
+  // Old API shape baked "(was: closed_at)" into fixed_split; strip it so it is never shown twice.
+  const fixedSplit = (data?.leakage.fixed_split ?? "").replace(/\s*\(was:[^)]*\)\s*$/, "");
+  const previousSplit =
+    data?.leakage.previous_split ??
+    /\(was:\s*([^)]*)\)/.exec(data?.leakage.fixed_split ?? "")?.[1] ??
+    "closed_at";
+  const vsc = data?.leakage.honest_metrics.vscode;
   // Dimensions come ONLY from judge.per_repo[*].dimensions (new API). The old API's
   // judge.dimensions[*].production_mean are stale n=65 values and are never read.
   const dimensionRepos = Object.entries(data?.judge?.per_repo ?? {}).flatMap(([repo, r]) =>
@@ -218,8 +254,8 @@ export default function Eval() {
                   <p className="text-muted-foreground text-xs">{data.leakage.removal_reason}</p>
                   <p className="text-muted-foreground text-xs">
                     Temporal split corrected:{" "}
-                    <span className="font-mono">{data.leakage.fixed_split}</span>{" "}
-                    (was: <span className="font-mono">closed_at</span>)
+                    <span className="font-mono">{fixedSplit}</span>{" "}
+                    (was: <span className="font-mono">{previousSplit}</span>)
                   </p>
                 </div>
 
@@ -235,7 +271,9 @@ export default function Eval() {
                           <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Improvement vs naive</th>
                           <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">LightGBM MAE</th>
                           <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Naive MAE</th>
-                          <th className="py-2 text-left text-xs font-medium text-muted-foreground">CI coverage</th>
+                          <th className="py-2 text-left text-xs font-medium text-muted-foreground">
+                            Raw interval coverage (Q10–Q90)
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -307,12 +345,21 @@ export default function Eval() {
                       </tbody>
                     </table>
                   </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Interval coverage here is the raw Q10–Q90 interval on the full test split (before
+                    conformal adjustment). Section 5 reports the conformal (CQR) coverage on a held-out
+                    subset, which is a different measurement.
+                  </p>
                   <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
-                    <strong>vscode:</strong> LightGBM underperforms a naive prior (−67.4%) because there is
-                    no creation-time signal that predicts resolution time for this repo. The system detects
-                    this (CI coverage 40.9%, confidence &lt; 40%) and falls back to the naive prior at
-                    inference — which is why vscode results show the low-confidence badge. This is intentional
-                    graceful degradation, not a bug.
+                    <strong>vscode:</strong> the LightGBM point estimate is worse than a naive median (
+                    {vsc?.improvement_pct}, MAE {vsc?.lgbm_mae_days}d vs {vsc?.naive_mae_days}d
+                    {vsc?.n_test != null ? `, n=${vsc.n_test}` : ""}) because there is no creation-time
+                    signal that predicts resolution time for this repo, and its raw{data.conformal ? ` ${pct(data.conformal.target_coverage, 0)}` : ""} interval covers only{" "}
+                    {vsc ? pct(vsc.ci_coverage) : "n/a"} of outcomes. The point estimate is still served,
+                    with a low-confidence badge.
+                    {vsc?.bucket_vs_naive_delta_pp != null && vsc.bucket_vs_naive_ci95_pp
+                      ? ` The bucket classifier loses to the naive majority bucket by ${Math.abs(vsc.bucket_vs_naive_delta_pp).toFixed(2)}pp (95% CI [${vsc.bucket_vs_naive_ci95_pp[0].toFixed(2)}, ${vsc.bucket_vs_naive_ci95_pp[1].toFixed(2)}]), so vscode's bucket field is the naive prior, not the model.`
+                      : ""}
                   </div>
                 </div>
               </CardContent>
@@ -324,7 +371,7 @@ export default function Eval() {
                 <CardTitle className="text-base flex items-center gap-2">
                   <span>2 · Classifier Calibration</span>
                   <Badge className="border border-green-300 bg-green-50 text-green-700 text-xs dark:border-green-700 dark:bg-green-950 dark:text-green-300">
-                    ADR-0004
+                    ADR-0036 · ADR-0057
                   </Badge>
                 </CardTitle>
               </CardHeader>
@@ -336,6 +383,11 @@ export default function Eval() {
                   </span>{" "}
                   — calibration reduces ECE without changing predictions.
                 </p>
+                {data.calibration.classifier && (
+                  <p className="text-xs text-muted-foreground">
+                    Classifier: {data.calibration.classifier}
+                  </p>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse">
                     <thead>
@@ -344,7 +396,8 @@ export default function Eval() {
                         <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">T_opt</th>
                         <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">ECE before (val)</th>
                         <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">ECE after (val)</th>
-                        <th className="py-2 text-left text-xs font-medium text-muted-foreground">ECE test</th>
+                        <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">ECE test</th>
+                        <th className="py-2 text-left text-xs font-medium text-muted-foreground">ECE gold eval set</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -358,16 +411,34 @@ export default function Eval() {
                           <td className="py-1.5 pr-4 text-xs font-mono">{label}</td>
                           <td className="py-1.5 pr-4 text-xs tabular-nums">{repo.T_opt}</td>
                           <td className="py-1.5 pr-4 text-xs tabular-nums text-muted-foreground">
-                            {repo.ece_before_val.toFixed(4)}
+                            {fmtOrNA(repo.ece_before_val)}
+                          </td>
+                          <td className="py-1.5 pr-4 text-xs tabular-nums text-muted-foreground">
+                            {fmtOrNA(repo.ece_after_val)}
                           </td>
                           <td className="py-1.5 pr-4 text-xs tabular-nums font-medium text-foreground">
-                            {repo.ece_after_val.toFixed(4)}
+                            {repo.ece_test.toFixed(4)}
                           </td>
-                          <td className="py-1.5 text-xs tabular-nums">{repo.ece_test.toFixed(4)}</td>
+                          <td className="py-1.5 text-xs tabular-nums">{fmtOrNA(repo.ece_eval_set)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="space-y-1 text-xs text-muted-foreground leading-relaxed">
+                  {data.calibration.ece_test_definition && (
+                    <p>
+                      <span className="font-medium text-foreground">ECE test:</span>{" "}
+                      {data.calibration.ece_test_definition}
+                    </p>
+                  )}
+                  {data.calibration.ece_eval_set_definition && (
+                    <p>
+                      <span className="font-medium text-foreground">ECE gold eval set:</span>{" "}
+                      {data.calibration.ece_eval_set_definition}
+                    </p>
+                  )}
+                  {data.calibration.val_ece_note && <p>{data.calibration.val_ece_note}</p>}
                 </div>
               </CardContent>
             </Card>
@@ -399,10 +470,10 @@ export default function Eval() {
                       <p>
                         <span className="font-medium">Current baseline:</span>{" "}
                         <span className="tabular-nums font-medium text-foreground">
-                          {baseline.overall.mean.toFixed(2)}/{JUDGE_MAX_SCORE}
+                          {baseline.overall.mean.toFixed(2)}/{judgeMax}
                         </span>{" "}
                         mean over n={baseline.overall.n} gold-set issues (
-                        {((baseline.overall.mean / JUDGE_MAX_SCORE) * 100).toFixed(1)}%).
+                        {((baseline.overall.mean / judgeMax) * 100).toFixed(1)}%).
                       </p>
                       <p className="text-muted-foreground">
                         Scores from earlier judge models (Llama-70b, Cohere Command A) were measured on a
@@ -417,7 +488,7 @@ export default function Eval() {
                             <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Repo</th>
                             <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">n</th>
                             <th className="py-2 text-left text-xs font-medium text-muted-foreground">
-                              Mean /{JUDGE_MAX_SCORE}
+                              Mean /{judgeMax}
                             </th>
                           </tr>
                         </thead>
@@ -495,8 +566,10 @@ export default function Eval() {
                     <code className="font-mono">{data.reranker.model_tested}</code>
                   </p>
                   <p>
-                    <span className="font-medium">Robustness test:</span> n={data.reranker.phase2_robustness_n},
-                    1000-resample bootstrap
+                    <span className="font-medium">Robustness test:</span> n={data.reranker.phase2_robustness_n}
+                    {data.reranker.phase2_n_bootstrap != null
+                      ? `, ${data.reranker.phase2_n_bootstrap}-resample bootstrap`
+                      : ", bootstrap CI"}
                   </p>
                 </div>
                 <div className="overflow-x-auto">
@@ -568,7 +641,8 @@ export default function Eval() {
                             <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Target</th>
                             <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">Empirical</th>
                             <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">95% Wilson CI</th>
-                            <th className="py-2 text-left text-xs font-medium text-muted-foreground">Raw (no CQR)</th>
+                            <th className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">n (cal / test)</th>
+                            <th className="py-2 text-left text-xs font-medium text-muted-foreground">Raw (no CQR), same subset</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -591,6 +665,11 @@ export default function Eval() {
                                 <td className="py-1.5 pr-4 text-xs tabular-nums font-mono text-muted-foreground">
                                   [{(r.coverage_ci95_lower * 100).toFixed(1)}%,{" "}
                                   {(r.coverage_ci95_upper * 100).toFixed(1)}%]
+                                </td>
+                                <td className="py-1.5 pr-4 text-xs tabular-nums font-mono text-muted-foreground">
+                                  {r.n_calibration != null && r.n_true_test != null
+                                    ? `${r.n_calibration} / ${r.n_true_test}`
+                                    : "n/a"}
                                 </td>
                                 <td className="py-1.5 text-xs tabular-nums text-muted-foreground">
                                   {(r.raw_interval_coverage * 100).toFixed(1)}%
@@ -653,11 +732,17 @@ export default function Eval() {
                         <strong>vscode temporal drift:</strong>{" "}
                         {data.conformal.by_repo["microsoft/vscode"].exchangeability_note}
                       </p>
-                      <p>
-                        Split sensitivity: 30/70 split yields 68.3% empirical coverage; 40/60
-                        yields 74.1% — a 5.8pp divergence that reflects non-stationarity in the
-                        2026 test window, not calibration noise. See ADR-0010.
-                      </p>
+                      {data.conformal.by_repo["microsoft/vscode"].split_sensitivity && (
+                        <p>
+                          Split sensitivity: 30/70 split yields{" "}
+                          {pct(data.conformal.by_repo["microsoft/vscode"].split_sensitivity!.split_30_70.empirical_coverage)}{" "}
+                          empirical coverage; 40/60 yields{" "}
+                          {pct(data.conformal.by_repo["microsoft/vscode"].split_sensitivity!.split_40_60.empirical_coverage)}{" "}
+                          — a {data.conformal.by_repo["microsoft/vscode"].split_sensitivity!.divergence_pp}pp
+                          divergence that reflects non-stationarity in the 2026 test window, not
+                          calibration noise. See ADR-0010.
+                        </p>
+                      )}
                     </div>
                   )}
                 </CardContent>
