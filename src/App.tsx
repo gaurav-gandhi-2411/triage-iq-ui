@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
@@ -56,6 +56,19 @@ const TITLE_MAX = 512;
 const BODY_MAX = 32000;
 const HISTORY_KEY = "triageiq_history";
 const HISTORY_MAX = 10;
+// Cloud Run cold starts take up to ~75 s; show the warm-up hint after this long without a response.
+const SLOW_AFTER_S = 8;
+// Never abort before the worst-case cold start (~75 s) plus the model call; 150 s leaves headroom.
+const TRIAGE_TIMEOUT_MS = 150_000;
+
+// Module-level so React StrictMode's double-invoked effects still send only one pre-warm per page load.
+let prewarmSent = false;
+function prewarmApi() {
+  if (prewarmSent) return;
+  prewarmSent = true;
+  // Fire-and-forget: wakes the Cloud Run instance (plain /health, not ?deps=1). Failures are ignored.
+  fetch(`${API_BASE}/health`, { method: "GET", cache: "no-store" }).catch(() => undefined);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -697,6 +710,25 @@ function MainPage() {
   const [error, setError] = useState<string | null>(null);
   const [paneVisible, setPaneVisible] = useState(true);
   const [recentTriages, setRecentTriages] = useState<HistoryEntry[]>(loadHistory);
+  const [elapsedS, setElapsedS] = useState(0);
+
+  useEffect(() => {
+    prewarmApi();
+  }, []);
+
+  // Elapsed-seconds ticker, only while a triage request is in flight.
+  useEffect(() => {
+    if (!loading) return;
+    const started = Date.now();
+    const id = window.setInterval(
+      () => setElapsedS(Math.floor((Date.now() - started) / 1000)),
+      1000
+    );
+    return () => {
+      window.clearInterval(id);
+      setElapsedS(0);
+    };
+  }, [loading]);
 
   function handleSampleSelect(s: Sample) {
     setRepo(s.repo);
@@ -750,9 +782,12 @@ function MainPage() {
     setError(null);
     setPaneVisible(true);
 
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), TRIAGE_TIMEOUT_MS);
     try {
       const res = await fetch(`${API_BASE}/triage`, {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         // issue_number only when the user gave a valid one: the API then leaves the issue
         // out of its own similar issues (the API also does this for exact text matches).
@@ -822,13 +857,20 @@ function MainPage() {
       setPaneVisible(true);
     } catch (err) {
       console.error("Triage network error", err);
+      const timedOut = err instanceof DOMException && err.name === "AbortError";
 
       setPaneVisible(false);
       await sleep(150);
       setLoading(false);
-      setError("Could not reach the triage service. Check your connection or try again.");
+      setError(
+        timedOut
+          ? "The request timed out after 2.5 minutes. The service may still be waking up; try again."
+          : "Could not reach the triage service. Check your connection or try again."
+      );
       await doubleRAF();
       setPaneVisible(true);
+    } finally {
+      window.clearTimeout(timeoutId);
     }
   }
 
@@ -840,7 +882,7 @@ function MainPage() {
   const submitLabel = loading
     ? hasSucceeded
       ? "Triaging…"
-      : "Waking up service… (~25s)"
+      : "Triaging…"
     : "Triage";
 
   const isDisabledForTitle = !title.trim() && !loading;
@@ -1007,6 +1049,25 @@ function MainPage() {
               paneVisible ? "opacity-100" : "opacity-0"
             }`}
           >
+            {/* Always mounted so screen readers pick up the polite announcement when text appears. */}
+            <div
+              role="status"
+              aria-live="polite"
+              className={loading && elapsedS >= SLOW_AFTER_S ? "mb-3" : undefined}
+            >
+              {loading && elapsedS >= SLOW_AFTER_S && (
+                <Alert>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <AlertDescription>
+                    Service is warming up — the first request after a quiet period can take up to ~75
+                    seconds.{" "}
+                    <span aria-hidden="true" className="tabular-nums text-muted-foreground">
+                      ({elapsedS}s elapsed)
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
             {loading && <TriagePlanSkeleton />}
             {!loading && error && (
               <Alert variant="destructive">
