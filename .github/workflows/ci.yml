@@ -17,11 +17,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: Eval page contract against committed core fixture
+        run: npm test
+      - name: Eval page contract against core main (live)
+        run: npm test
+        env:
+          CORE_CONTRACT_LIVE: "1"
       - name: npm audit (non-blocking)
         run: npm audit --audit-level=high
         continue-on-error: true
