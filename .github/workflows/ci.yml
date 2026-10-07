@@ -21,6 +21,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - name: Vercel ignore-step scenarios
+        run: node --test scripts/vercel-ignore.test.mjs
       - run: npm run build
       - name: npm audit (non-blocking)
         run: npm audit --audit-level=high

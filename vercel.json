@@ -1,3 +1,4 @@
 {
+  "ignoreCommand": "sh scripts/vercel-ignore.sh",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
