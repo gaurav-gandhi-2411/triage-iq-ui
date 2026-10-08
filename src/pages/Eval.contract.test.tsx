@@ -8,15 +8,26 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Eval from "./Eval";
 import baselineFixtureRaw from "../test/fixtures/core-main-eval-baseline.json?raw";
 import summaryFixtureRaw from "../test/fixtures/core-main-eval-summary.json?raw";
+import integBaselineRaw from "../test/fixtures/core-integration-eval-baseline.json?raw";
+import integSummaryRaw from "../test/fixtures/core-integration-eval-summary.json?raw";
 
 const LIVE = import.meta.env.CORE_CONTRACT_LIVE === "1";
 const RAW_BASE = "https://raw.githubusercontent.com/gaurav-gandhi-2411/triage-iq/main/reports";
 
 type Json = Record<string, unknown>;
+
+// Old shape (core main, no resolution_served) and new shape (core integration branch, expand-only
+// resolution_served + honest_metrics_status). Both must keep rendering: renaming a key blanked
+// /eval in production on 2026-10-05. LIVE mode checks core main only.
+const FIXTURES = [
+  { label: "core main (old shape)", summary: summaryFixtureRaw, baseline: baselineFixtureRaw, mean: "11.94/15", n: "n=64" },
+  { label: "core integration (resolution_served)", summary: integSummaryRaw, baseline: integBaselineRaw, mean: "12.03/15", n: "n=64" },
+];
+const ACTIVE = LIVE ? FIXTURES.slice(0, 1) : FIXTURES;
 
 // Surfaces a render crash (e.g. "Cannot read properties of undefined") as a readable failure
 // instead of an opaque waitFor timeout.
@@ -73,6 +84,7 @@ async function fetchCoreFile(name: string): Promise<Json> {
 // Capture before stubbing: the live loader needs the real network fetch.
 const realFetch = globalThis.fetch;
 let apiResponse: Json;
+let fixture = FIXTURES[0];
 const uncaught: string[] = [];
 const onWindowError = (e: ErrorEvent) => uncaught.push(String(e.error ?? e.message));
 
@@ -88,8 +100,8 @@ beforeEach(async () => {
     );
   } else {
     apiResponse = buildApiResponse(
-      JSON.parse(summaryFixtureRaw) as Json,
-      JSON.parse(baselineFixtureRaw) as Json,
+      JSON.parse(fixture.summary) as Json,
+      JSON.parse(fixture.baseline) as Json,
     );
   }
   vi.stubGlobal(
@@ -111,7 +123,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe(`Eval page contract (${LIVE ? "core main LIVE" : "committed fixture"})`, () => {
+describe.each(ACTIVE)("Eval page contract ($label)", (fx) => {
+  beforeAll(() => {
+    fixture = fx;
+  });
   it("renders every section against core's eval_summary.json with no broken values", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     render(
@@ -154,8 +169,8 @@ describe(`Eval page contract (${LIVE ? "core main LIVE" : "committed fixture"})`
     expect(text).toContain(`n=${baseline!.overall.n}`);
     if (!LIVE) {
       // Pin the known committed baseline so a fixture refresh is a conscious act.
-      expect(text).toContain("11.94/15");
-      expect(text).toContain("n=64");
+      expect(text).toContain(fx.mean);
+      expect(text).toContain(fx.n);
     }
 
     // No broken interpolations anywhere on the page.

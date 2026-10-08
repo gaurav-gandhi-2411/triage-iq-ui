@@ -24,4 +24,9 @@ export type TriagePlan = components["schemas"]["TriagePlan"] & {
   _model?: string | null;
   classifier_top3?: Array<{ label: string; confidence: number }>;
   resolution_model_beats_naive?: boolean;
+  // Core ADR-0064 (D7): the served point estimate may be the training-window median. Expand-only;
+  // older servers omit all three, which must be read as "model".
+  resolution_point_days?: number | null;
+  resolution_point_source?: "model" | "train_median";
+  resolution_interval_basis?: "model" | "naive_scaled";
 };
