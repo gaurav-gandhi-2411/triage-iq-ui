@@ -49,6 +49,92 @@ function judgeMaxScore(dimensionMax?: Record<string, number>): number {
 }
 
 const pct = (x: number, digits = 1) => `${(x * 100).toFixed(digits)}%`;
+
+const dayStr = (x: number | null | undefined) =>
+  typeof x === "number" && Number.isFinite(x) ? `${x.toFixed(2)}d` : "—";
+
+function ServedTable({ served }: { served: ResolutionServed }) {
+  const repos = Object.entries(served.repos ?? {});
+  const shas = Object.entries(served.provenance?.manifest_sha256 ?? {}).filter(([k]) =>
+    k.includes("resolution_predictor"),
+  );
+  return (
+    <div className="mt-4" data-testid="resolution-served">
+      <p className="text-xs font-medium text-muted-foreground mb-2">
+        What production serves today (train-median point estimate)
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-border">
+              {[
+                "Repo",
+                "Served point (train median)",
+                "Served MAE / median AE",
+                "Learned model, not served: MAE / median AE",
+                "Bucket accuracy vs naive majority",
+                "Interval coverage (CQR)",
+              ].map((h) => (
+                <th key={h} className="py-2 pr-4 text-left text-xs font-medium text-muted-foreground">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {repos.map(([repo, r]) => {
+              const ci = r?.bucket?.delta_ci95_pp;
+              const cov = r?.interval?.coverage_cqr_v2_heldout ?? r?.interval?.coverage_heldout;
+              return (
+                <tr key={repo} className="border-b border-border/50 align-top">
+                  <td className="py-1.5 pr-4 text-xs font-mono">{repo}</td>
+                  <td className="py-1.5 pr-4 text-xs tabular-nums font-medium">
+                    {dayStr(r?.served_point_days)}
+                  </td>
+                  <td className="py-1.5 pr-4 text-xs tabular-nums">
+                    {dayStr(r?.served?.mae_days)} / {dayStr(r?.served?.median_ae_days)}
+                  </td>
+                  <td className="py-1.5 pr-4 text-xs tabular-nums text-muted-foreground">
+                    {dayStr(r?.learned_model_not_served?.mae_days)} /{" "}
+                    {dayStr(r?.learned_model_not_served?.median_ae_days)}
+                  </td>
+                  <td className="py-1.5 pr-4 text-xs tabular-nums">
+                    {typeof r?.bucket?.delta_pp === "number"
+                      ? `${r.bucket.delta_pp >= 0 ? "+" : ""}${r.bucket.delta_pp.toFixed(2)}pp`
+                      : "—"}
+                    {Array.isArray(ci) && ci.length === 2
+                      ? ` (95% CI [${ci[0].toFixed(2)}, ${ci[1].toFixed(2)}])`
+                      : ""}
+                  </td>
+                  <td className="py-1.5 text-xs tabular-nums">
+                    {typeof cov === "number" ? pct(cov) : "—"}
+                    {typeof r?.interval?.nominal_coverage === "number"
+                      ? ` (nominal ${pct(r.interval.nominal_coverage, 0)})`
+                      : ""}
+                    {typeof r?.interval?.n_heldout === "number" ? `, n=${r.interval.n_heldout}` : ""}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+        The point estimate is the training-window median: the learned model did not beat it on the
+        typical issue in either repository. The bucket classifier (kubernetes) and the conformal
+        intervals are the learned parts.
+      </p>
+      {shas.length > 0 && (
+        <p className="mt-1 text-xs text-muted-foreground font-mono">
+          Provenance:{" "}
+          {shas
+            .map(([k, v]) => `${(k.split("/").pop() ?? k).replace(/\.pkl$/, "")} ${String(v).slice(0, 12)}`)
+            .join("; ")}
+        </p>
+      )}
+    </div>
+  );
+}
 const fmtOrNA = (x: number | null | undefined, digits = 4) => (x == null ? "n/a" : x.toFixed(digits));
 
 interface CalibrationRepo {
@@ -60,7 +146,33 @@ interface CalibrationRepo {
   ece_eval_set?: number | null;
 }
 
+// core ADR-0064 (D7): what production actually serves. Every field is optional on purpose: this
+// block is new (expand-only) and a missing sub-field must render a dash, never throw.
+interface ServedRepo {
+  served_point_days?: number | null;
+  n_test?: number | null;
+  served?: { mae_days?: number | null; median_ae_days?: number | null };
+  learned_model_not_served?: { mae_days?: number | null; median_ae_days?: number | null };
+  bucket?: {
+    delta_pp?: number | null;
+    delta_ci95_pp?: [number, number] | null;
+    served?: string | null;
+  };
+  interval?: {
+    coverage_cqr_v2_heldout?: number | null;
+    coverage_heldout?: number | null;
+    n_heldout?: number | null;
+    nominal_coverage?: number | null;
+  };
+}
+
+interface ResolutionServed {
+  provenance?: { manifest_sha256?: Record<string, string> };
+  repos?: Record<string, ServedRepo>;
+}
+
 interface EvalSummary {
+  resolution_served?: ResolutionServed | null;
   leakage: {
     feature_removed: string;
     removal_reason: string;
@@ -73,6 +185,8 @@ interface EvalSummary {
       vscode_improvement_pct: string;
       note: string;
     };
+    // New API shape: labels the honest_metrics table below as historical (not what is served).
+    honest_metrics_status?: string;
     honest_metrics: {
       k8s: {
         lgbm_mae_days: number;
@@ -304,6 +418,8 @@ export default function Eval() {
                           </td>
                           <td colSpan={3} className="py-1 text-xs text-muted-foreground">—</td>
                         </tr>
+                        {!data.resolution_served && (
+                        <>
                         {/* Honest metrics */}
                         <tr>
                           <td colSpan={5} className="pt-3 pb-1">
@@ -342,9 +458,18 @@ export default function Eval() {
                             {(data.leakage.honest_metrics.vscode.ci_coverage * 100).toFixed(1)}%
                           </td>
                         </tr>
+                        </>
+                        )}
                       </tbody>
                     </table>
                   </div>
+                  {data.resolution_served ? (
+                    <ServedTable served={data.resolution_served} />
+                  ) : (
+                    <>
+                  {data.leakage.honest_metrics_status && (
+                    <p className="mt-2 text-xs text-muted-foreground italic">{data.leakage.honest_metrics_status}</p>
+                  )}
                   <p className="mt-2 text-xs text-muted-foreground">
                     Interval coverage here is the raw Q10–Q90 interval on the full test split (before
                     conformal adjustment). Section 5 reports the conformal (CQR) coverage on a held-out
@@ -361,6 +486,8 @@ export default function Eval() {
                       ? ` The bucket classifier loses to the naive majority bucket by ${Math.abs(vsc.bucket_vs_naive_delta_pp).toFixed(2)}pp (95% CI [${vsc.bucket_vs_naive_ci95_pp[0].toFixed(2)}, ${vsc.bucket_vs_naive_ci95_pp[1].toFixed(2)}]), so vscode's bucket field is the naive prior, not the model.`
                       : ""}
                   </div>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>

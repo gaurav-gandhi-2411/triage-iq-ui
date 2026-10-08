@@ -591,7 +591,11 @@ function TriagePlanCard({
               bucket={plan.resolution_bucket}
               confidencePct={plan.resolution_confidence_pct}
             />
-            <ConfidenceBadge beatsNaive={plan.resolution_model_beats_naive ?? true} />
+            <ConfidenceBadge
+              beatsNaive={plan.resolution_model_beats_naive ?? true}
+              pointSource={plan.resolution_point_source}
+              pointDays={plan.resolution_point_days}
+            />
           </div>
 
           <div className="space-y-1.5">
