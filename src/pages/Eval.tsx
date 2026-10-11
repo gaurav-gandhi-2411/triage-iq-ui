@@ -23,6 +23,9 @@ interface ConformalRepoStats {
   // New API shape only (2026-10): sample sizes + vscode split sensitivity.
   n_calibration?: number;
   n_true_test?: number;
+  // Core PR (2026-10-12): the served interval's basis. The superseded pre-re-centring coverage
+  // lives under stored_calibration_pre_recentring and is deliberately not rendered.
+  interval_basis?: string;
   split_sensitivity?: {
     split_30_70: { n_calibration: number; n_true_test: number; empirical_coverage: number };
     split_40_60: { n_calibration: number; n_true_test: number; empirical_coverage: number };
@@ -57,6 +60,25 @@ function ServedTable({ served }: { served: ResolutionServed }) {
   const repos = Object.entries(served.repos ?? {});
   const shas = Object.entries(served.provenance?.manifest_sha256 ?? {}).filter(([k]) =>
     k.includes("resolution_predictor"),
+  );
+  // Derived from the served numbers, never typed in: k8s mean-error gain of the learned model over
+  // the served median, and how concentrated it is in the longest-resolving issues.
+  const k8s = served.repos?.["kubernetes/kubernetes"];
+  const servedMae = k8s?.served?.mae_days;
+  const learnedMae = k8s?.learned_model_not_served?.mae_days;
+  const k8sGainPct =
+    typeof servedMae === "number" && typeof learnedMae === "number" && servedMae > 0
+      ? ((servedMae - learnedMae) / servedMae) * 100
+      : null;
+  const rawTail = k8s?.learned_model_not_served?.mae_gain_tail_share;
+  const tail =
+    rawTail &&
+    typeof rawTail.share_of_total_gain === "number" &&
+    typeof rawTail.min_resolution_days === "number"
+      ? { share_of_total_gain: rawTail.share_of_total_gain, min_resolution_days: rawTail.min_resolution_days }
+      : null;
+  const splitLines = repos.flatMap(([repo, r]) =>
+    typeof r?.interval?.split === "string" ? [[repo, r.interval.split] as const] : [],
   );
   return (
     <div className="mt-4" data-testid="resolution-served">
@@ -119,11 +141,26 @@ function ServedTable({ served }: { served: ResolutionServed }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-        The point estimate is the training-window median: the learned model did not beat it on the
-        typical issue in either repository. The bucket classifier (kubernetes) and the conformal
-        intervals are the learned parts.
+      <p className="mt-2 text-xs text-muted-foreground leading-relaxed" data-testid="served-wording">
+        The point estimate is the training-window median. The learned model did not beat it on the
+        typical issue in either repository (median absolute error); on k8s it is marginally better
+        on mean error{k8sGainPct != null ? ` (+${k8sGainPct.toFixed(0)}%)` : ""}, driven by a small
+        number of long-running issues
+        {tail != null
+          ? ` (the longest-resolving 10% of issues, ${tail.min_resolution_days.toFixed(0)}+ days, account for ${pct(tail.share_of_total_gain, 0)} of that gain)`
+          : ""}
+        . The learned parts in production are the k8s bucket classifier and the conformal
+        intervals.
       </p>
+      {splitLines.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground" data-testid="interval-splits">
+          {splitLines.map(([repo, split]) => (
+            <li key={repo}>
+              <span className="font-mono">{repo}</span> coverage split: {split}
+            </li>
+          ))}
+        </ul>
+      )}
       {shas.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground font-mono">
           Provenance:{" "}
@@ -152,7 +189,12 @@ interface ServedRepo {
   served_point_days?: number | null;
   n_test?: number | null;
   served?: { mae_days?: number | null; median_ae_days?: number | null };
-  learned_model_not_served?: { mae_days?: number | null; median_ae_days?: number | null };
+  learned_model_not_served?: {
+    mae_days?: number | null;
+    median_ae_days?: number | null;
+    // core 2026-10-12: share of the mean-error gain from the longest-resolving 10% of issues.
+    mae_gain_tail_share?: { share_of_total_gain?: number | null; min_resolution_days?: number | null } | null;
+  };
   bucket?: {
     delta_pp?: number | null;
     delta_ci95_pp?: [number, number] | null;
@@ -163,6 +205,8 @@ interface ServedRepo {
     coverage_heldout?: number | null;
     n_heldout?: number | null;
     nominal_coverage?: number | null;
+    // core 2026-10-12: names the split behind the coverage figure.
+    split?: string | null;
   };
 }
 
@@ -374,6 +418,21 @@ export default function Eval() {
                 </div>
 
                 <div>
+                  {data.resolution_served && (
+                    // New API shape: the multi-column table below is the OLD deployed-model table;
+                    // rendering its header over only the two INVALIDATED rows left empty columns.
+                    // The served table (next) is the resolution result; keep only the retraction.
+                    <p className="text-xs text-muted-foreground italic" data-testid="retracted-metrics">
+                      Prior metrics (broken closed_at split) —{" "}
+                      <span className="font-medium text-destructive">INVALIDATED</span>: k8s{" "}
+                      <span className="line-through">{data.leakage.prior_metrics_invalidated.k8s_improvement_pct}</span>
+                      , vscode{" "}
+                      <span className="line-through">{data.leakage.prior_metrics_invalidated.vscode_improvement_pct}</span>
+                      .
+                    </p>
+                  )}
+                  {!data.resolution_served && (
+                  <>
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
                     Resolution Predictor Results
                   </p>
@@ -463,6 +522,8 @@ export default function Eval() {
                       </tbody>
                     </table>
                   </div>
+                  </>
+                  )}
                   {data.resolution_served ? (
                     <ServedTable served={data.resolution_served} />
                   ) : (
@@ -868,6 +929,15 @@ export default function Eval() {
                           — a {data.conformal.by_repo["microsoft/vscode"].split_sensitivity!.divergence_pp}pp
                           divergence that reflects non-stationarity in the 2026 test window, not
                           calibration noise. See ADR-0010.
+                        </p>
+                      )}
+                      {data.conformal.by_repo["microsoft/vscode"].interval_basis && (
+                        <p data-testid="vscode-interval-basis">
+                          <strong>Split:</strong>{" "}
+                          {data.conformal.by_repo["microsoft/vscode"].calibration_split}{" "}
+                          <strong>Interval:</strong>{" "}
+                          {data.conformal.by_repo["microsoft/vscode"].interval_basis} See ADR-0010
+                          and ADR-0064.
                         </p>
                       )}
                     </div>

@@ -146,9 +146,14 @@ describe.each(ACTIVE)("Eval page contract ($label)", (fx) => {
     expect(text, "Eval page crashed while rendering").not.toContain("RENDER_CRASH");
 
     expect(text).not.toContain("Failed to load eval summary");
+    // Old shape: the deployed-model table. New shape (resolution_served): the served table, with
+    // no multi-column header over empty cells (only a one-line retraction).
+    const resolutionSection = apiResponse.resolution_served
+      ? "What production serves today"
+      : "Resolution Predictor Results";
     for (const section of [
       "Feature Leakage Retraction",
-      "Resolution Predictor Results",
+      resolutionSection,
       "Classifier Calibration",
       "LLM-as-Judge Evaluation",
       "Cross-Encoder Reranker",
