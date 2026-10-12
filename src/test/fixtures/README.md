@@ -14,6 +14,14 @@ derived from `eval_baseline.json` (`_current_llm_baseline` in core `src/triage_i
 fixture needs. To refresh: re-copy both files from core `main` and update the SHA above.
 The live test (`CORE_CONTRACT_LIVE=1`) fetches the same two files from core `main` at run time.
 
+## Served-block fixture (core PR "fix(reports): /eval serves the vscode served-interval coverage")
+
+- `core-served-eval-summary.json` = verbatim `reports/eval_summary.json` from core branch
+  `fix/eval-summary-vscode-served-coverage` at `02fa2a29812e12b102623e8ffc2043d27ed47a16`
+  (core PR #172): served vscode coverage 82.7% in section 5, `interval.split`, k8s
+  `mae_gain_tail_share`. Used by `Eval.served.test.tsx`; replace with core main's file once #172
+  merges.
+
 ## Integration-branch fixtures (expand-only `resolution_served`)
 
 - `core-integration-eval-summary.json` / `core-integration-eval-baseline.json` = verbatim
