@@ -74,9 +74,15 @@ function ServedTable({ served }: { served: ResolutionServed }) {
   const tail =
     rawTail &&
     typeof rawTail.share_of_total_gain === "number" &&
-    typeof rawTail.min_resolution_days === "number"
-      ? { share_of_total_gain: rawTail.share_of_total_gain, min_resolution_days: rawTail.min_resolution_days }
+    typeof rawTail.min_resolution_days === "number" &&
+    typeof rawTail.longest_resolving_fraction === "number"
+      ? {
+          share_of_total_gain: rawTail.share_of_total_gain,
+          min_resolution_days: rawTail.min_resolution_days,
+          fraction: rawTail.longest_resolving_fraction,
+        }
       : null;
+  const tailLabel = tail != null ? `${Math.round(tail.fraction * 100)}% of issues` : "issues";
   const splitLines = repos.flatMap(([repo, r]) =>
     typeof r?.interval?.split === "string" ? [[repo, r.interval.split] as const] : [],
   );
@@ -144,10 +150,10 @@ function ServedTable({ served }: { served: ResolutionServed }) {
       <p className="mt-2 text-xs text-muted-foreground leading-relaxed" data-testid="served-wording">
         The point estimate is the training-window median. The learned model did not beat it on the
         typical issue in either repository (median absolute error); on k8s it is marginally better
-        on mean error{k8sGainPct != null ? ` (+${k8sGainPct.toFixed(0)}%)` : ""}, driven by a small
-        number of long-running issues
+        on mean error{k8sGainPct != null ? ` (+${k8sGainPct.toFixed(0)}%)` : ""}, almost entirely from
+        the longest-resolving {tailLabel}
         {tail != null
-          ? ` (the longest-resolving 10% of issues, ${tail.min_resolution_days.toFixed(0)}+ days, account for ${pct(tail.share_of_total_gain, 0)} of that gain)`
+          ? ` (${tail.min_resolution_days.toFixed(0)}+ days; they carry ${pct(tail.share_of_total_gain, 0)} of that gain)`
           : ""}
         . The learned parts in production are the k8s bucket classifier and the conformal
         intervals.
@@ -192,8 +198,12 @@ interface ServedRepo {
   learned_model_not_served?: {
     mae_days?: number | null;
     median_ae_days?: number | null;
-    // core 2026-10-12: share of the mean-error gain from the longest-resolving 10% of issues.
-    mae_gain_tail_share?: { share_of_total_gain?: number | null; min_resolution_days?: number | null } | null;
+    // core 2026-10-12: share of the mean-error gain from the longest-resolving 20% of issues.
+    mae_gain_tail_share?: {
+      share_of_total_gain?: number | null;
+      min_resolution_days?: number | null;
+      longest_resolving_fraction?: number | null;
+    } | null;
   };
   bucket?: {
     delta_pp?: number | null;

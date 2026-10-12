@@ -56,13 +56,14 @@ describe("Eval page, served block (core #172)", () => {
     expect(wording).toContain("did not beat it on the typical issue in either repository");
     expect(wording).toContain("(median absolute error)");
     expect(wording).toContain("marginally better on mean error (+2%)");
-    expect(wording).toContain("driven by a small number of long-running issues");
+    expect(wording).toContain("almost entirely from the longest-resolving 20% of issues");
     expect(wording).toContain(
       "The learned parts in production are the k8s bucket classifier and the conformal intervals.",
     );
     const tail = SERVED.resolution_served.repos["kubernetes/kubernetes"].learned_model_not_served
       .mae_gain_tail_share;
-    expect(wording).toContain(`account for ${(tail.share_of_total_gain * 100).toFixed(0)}% of that gain`);
+    expect(wording).toContain(`they carry ${(tail.share_of_total_gain * 100).toFixed(0)}% of that gain`);
+    expect(tail.longest_resolving_fraction).toBe(0.2);
     expect(wording).toContain(`${tail.min_resolution_days.toFixed(0)}+ days`);
     expect(wording).not.toMatch(/ \./); // no stray space before a full stop
     for (const bad of ["undefined", "NaN", "[object"]) expect(text).not.toContain(bad);
@@ -102,7 +103,7 @@ describe("Eval page, served block (core #172)", () => {
     delete broken.resolution_served.repos["microsoft/vscode"].interval.split;
     const text = await renderEval(broken);
     const wording = document.querySelector('[data-testid="served-wording"]')?.textContent ?? "";
-    expect(wording).toContain("driven by a small number of long-running issues. The learned parts");
+    expect(wording).toContain("almost entirely from the longest-resolving issues. The learned parts");
     expect(text).not.toContain("Failed to load");
     for (const bad of ["undefined", "NaN", "[object"]) expect(text).not.toContain(bad);
   });
