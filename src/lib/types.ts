@@ -19,6 +19,10 @@ export type ConformalIntervalResult = components["schemas"]["ConformalIntervalRe
 export type TriagePlan = components["schemas"]["TriagePlan"] & {
   _request_id: string;
   _llm_status: string;
+  // True when the plan is the signals-only (ML-only) fallback: the LLM stage did not answer (core
+  // ADR-0063). `_llm_status_reason` says why (e.g. "rate_limited_tpd"). Both optional: older APIs omit them.
+  _degraded?: boolean | null;
+  _llm_status_reason?: string | null;
   _llm_cache_hit?: boolean | null;
   // The LLM that produced this plan (API 2026-09-24). Optional: older API revisions omit it.
   _model?: string | null;

@@ -44,6 +44,8 @@ import {
 import { ConfidenceBadge } from "./components/ConfidenceBadge";
 import { ResolutionBucketBadge } from "./components/ResolutionBucketBadge";
 import { UnderTheHood } from "./components/UnderTheHood";
+import { DegradedNotice } from "./components/DegradedNotice";
+import { isDegraded } from "./lib/degraded";
 import Eval from "./pages/Eval";
 import type { TriagePlan, SimilarIssue } from "@/lib/types";
 
@@ -356,11 +358,17 @@ function HistorySection({
                 {e.title}
               </p>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                <span
-                  className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium border ${PRIORITY_BADGE[e.result.priority_guess] ?? ""}`}
-                >
-                  {e.result.priority_guess}
-                </span>
+                {isDegraded(e.result) ? (
+                  <span className="inline-flex items-center rounded-full border px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                    ML-only
+                  </span>
+                ) : (
+                  <span
+                    className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-xs font-medium border ${PRIORITY_BADGE[e.result.priority_guess] ?? ""}`}
+                  >
+                    {e.result.priority_guess}
+                  </span>
+                )}
                 <span className="text-xs text-muted-foreground">
                   {timeAgo(e.ts)}
                 </span>
@@ -499,7 +507,7 @@ function TriagePlanSkeleton() {
   );
 }
 
-function TriagePlanCard({
+export function TriagePlanCard({
   plan,
   repo,
   onCopyLink,
@@ -510,6 +518,10 @@ function TriagePlanCard({
   onCopyLink: () => void;
   onCopyJson: () => void;
 }) {
+  // ML-only plan (core ADR-0063): the LLM did not answer. Component, similar issues and the resolution
+  // interval are still real model output; the summary, priority, assignee and next steps are NOT
+  // generated (the API fills them with fixed placeholders), so they are labelled absent, not shown.
+  const degraded = isDegraded(plan);
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -550,16 +562,28 @@ function TriagePlanCard({
               </TooltipTrigger>
               <TooltipContent side="bottom">Copy as JSON</TooltipContent>
             </Tooltip>
-            <Badge
-              className={`border text-xs font-medium ${PRIORITY_BADGE[plan.priority_guess] ?? ""}`}
-            >
-              {plan.priority_guess} priority
-            </Badge>
+            {degraded ? (
+              <Badge variant="outline" className="text-xs font-medium text-muted-foreground">
+                ML-only plan
+              </Badge>
+            ) : (
+              <Badge
+                className={`border text-xs font-medium ${PRIORITY_BADGE[plan.priority_guess] ?? ""}`}
+              >
+                {plan.priority_guess} priority
+              </Badge>
+            )}
           </div>
         </div>
-        <CardDescription className="mt-2 text-sm leading-relaxed">
-          {plan.triage_summary}
-        </CardDescription>
+        {degraded ? (
+          <div className="mt-2">
+            <DegradedNotice reason={plan._llm_status_reason} />
+          </div>
+        ) : (
+          <CardDescription className="mt-2 text-sm leading-relaxed">
+            {plan.triage_summary}
+          </CardDescription>
+        )}
       </CardHeader>
 
       <CardContent className="space-y-5">
@@ -581,7 +605,9 @@ function TriagePlanCard({
               Resolution
             </p>
             <p className="text-xs text-muted-foreground">
-              {plan.expected_resolution_summary}
+              {degraded
+                ? "Interval from the trained resolution-time model; no language-model commentary."
+                : plan.expected_resolution_summary}
             </p>
             <ResolutionBar
               lower={plan.expected_resolution_lower_days}
@@ -602,23 +628,33 @@ function TriagePlanCard({
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Suggested assignee
             </p>
-            <span className="inline-block rounded bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
-              {plan.suggested_assignee_class || "—"}
-            </span>
+            {degraded ? (
+              <span className="inline-block text-xs text-muted-foreground">Not generated</span>
+            ) : (
+              <span className="inline-block rounded bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
+                {plan.suggested_assignee_class || "—"}
+              </span>
+            )}
           </div>
         </div>
 
         <Separator />
 
         <div className="space-y-5">
-          <div>
-            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Priority rationale
+          {degraded ? (
+            <p className="text-sm text-muted-foreground" data-testid="degraded-absent">
+              Priority rationale and next steps are not generated in ML-only mode.
             </p>
-            <p className="text-sm text-muted-foreground">{plan.priority_rationale}</p>
-          </div>
+          ) : (
+            <div>
+              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Priority rationale
+              </p>
+              <p className="text-sm text-muted-foreground">{plan.priority_rationale}</p>
+            </div>
+          )}
 
-          {plan.suggested_next_steps.length > 0 && (
+          {!degraded && plan.suggested_next_steps.length > 0 && (
             <div>
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Next steps

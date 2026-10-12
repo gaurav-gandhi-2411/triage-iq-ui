@@ -1,0 +1,101 @@
+{
+  "predicted_component": "kubelet",
+  "component_confidence": 0.6062548060310021,
+  "similar_issues": [
+    {
+      "number": 27167,
+      "similarity": 0.7842907905578613,
+      "relevance_note": "Retrieved by embedding similarity; LLM summary unavailable."
+    },
+    {
+      "number": 26903,
+      "similarity": 0.7725868225097656,
+      "relevance_note": "Retrieved by embedding similarity; LLM summary unavailable."
+    },
+    {
+      "number": 28192,
+      "similarity": 0.7476401329040527,
+      "relevance_note": "Retrieved by embedding similarity; LLM summary unavailable."
+    },
+    {
+      "number": 4089,
+      "similarity": 0.7356173396110535,
+      "relevance_note": "Retrieved by embedding similarity; LLM summary unavailable."
+    },
+    {
+      "number": 28017,
+      "similarity": 0.734865665435791,
+      "relevance_note": "Retrieved by embedding similarity; LLM summary unavailable."
+    }
+  ],
+  "expected_resolution_summary": "LLM response unparseable; estimate from predictor only.",
+  "expected_resolution_lower_days": 0.09696049854416677,
+  "expected_resolution_upper_days": 85.51758657251393,
+  "resolution_bucket": "hours",
+  "resolution_confidence_pct": 48.1,
+  "resolution_interval_conformal": {
+    "lower_days": 0.09696049854416677,
+    "upper_days": 85.51758657251393,
+    "target_coverage": 0.8,
+    "empirical_coverage": 0.7971,
+    "coverage_ci95_lower": 0.7794,
+    "coverage_ci95_upper": 0.8138
+  },
+  "priority_guess": "medium",
+  "priority_rationale": "LLM provider unavailable (rate_limited_tpd) \u2014 priority defaulting to medium.",
+  "suggested_assignee_class": "unknown",
+  "suggested_next_steps": [
+    "Manual triage required \u2014 LLM response parsing failed."
+  ],
+  "triage_summary": "Automated triage degraded: LLM provider unavailable (rate_limited_tpd). Component from TF-IDF only; manual review recommended.",
+  "grounding": {
+    "component_source": "kubelet",
+    "similar_issue_refs": [
+      27167,
+      26903,
+      28192,
+      4089,
+      28017
+    ]
+  },
+  "grounding_status": {
+    "component_grounded": true,
+    "component_reason": "in classifier_top3",
+    "similar_issue_refs": [
+      27167,
+      26903,
+      28192,
+      4089,
+      28017
+    ],
+    "ungrounded_refs": [],
+    "all_grounded": true
+  },
+  "declared_attribution": null,
+  "abstention_status": null,
+  "_request_id": "e0a79e2f-8b38-46a9-a7cb-895dbc012f34",
+  "_llm_status": "degraded_provider_error",
+  "_llm_status_reason": "rate_limited_tpd",
+  "_degraded": true,
+  "_llm_cache_hit": false,
+  "_model": "openai/gpt-oss-120b",
+  "classifier_top3": [
+    {
+      "label": "kubelet",
+      "confidence": 0.6062548060310021
+    },
+    {
+      "label": "upgrade",
+      "confidence": 0.5078477619810468
+    },
+    {
+      "label": "test",
+      "confidence": 0.4872246852149077
+    }
+  ],
+  "resolution_model_beats_naive": true,
+  "resolution_point_days": 3.036504629629629,
+  "resolution_point_source": "train_median",
+  "resolution_interval_basis": "model",
+  "resolution_point_clamped": false
+}
